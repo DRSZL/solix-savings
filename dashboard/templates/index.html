@@ -1,0 +1,2405 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solix Savings Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+            .header h1 { font-size: 1.2rem; }
+            .timer-box { display: none; }
+            .card .value { font-size: 1.4rem; }
+            .card { padding: 14px; }
+            .cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .pv-cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .pv-card { padding: 12px; }
+            .pv-card .pv-live { font-size: 1.4rem; }
+            .section-title { margin-top: 20px; }
+            .daily { padding: 12px; }
+            canvas { max-height: 220px !important; }
+            #pvDayChart { height: 220px !important; max-height: none !important; }
+            .charts { grid-template-columns: 1fr !important; }
+            .chart-box.full { grid-column: 1 !important; }
+
+            /* Tagesübersicht: horizontal scrollbar auf Mobile */
+            .daily { padding: 12px 0 12px 12px !important; }
+            .daily-nav { padding: 0 12px; }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0a0a0a 100%);
+            background-attachment: fixed;
+            color: #e5e5e5;
+            position: relative;
+            min-height: 100vh;
+            overflow-x: clip;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%; left: -50%;
+            width: 200%; height: 200%;
+            background: radial-gradient(circle at 20% 50%, rgba(64,64,64,0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 80%, rgba(64,64,64,0.12) 0%, transparent 50%);
+            animation: drift 30s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        @keyframes drift {
+            0%, 100% { transform: translate(0, 0); }
+            50% { transform: translate(10%, 10%); }
+        }
+
+        .header {
+            background: rgba(30,30,30,0.6);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            padding: 20px 30px;
+            border-bottom: 1px solid rgba(163,163,163,0.1);
+            box-shadow: 0 4px 30px rgba(0,0,0,0.3);
+            display: flex; justify-content: space-between; align-items: center;
+            position: relative; z-index: 10;
+        }
+        .header h1 { font-size: 1.5rem; color: #a3a3a3; text-shadow: 0 0 20px rgba(163,163,163,0.5); font-weight: 600; }
+        .header p { color: #a3a3a3; font-size: 0.9rem; margin-top: 4px; }
+        .timer-box { text-align: right; }
+        .timer-label { font-size: 0.75rem; color: #737373; text-transform: uppercase; letter-spacing: 1px; }
+        .timer-value { font-size: 1.8rem; font-weight: bold; color: #a3a3a3; font-variant-numeric: tabular-nums; text-shadow: 0 0 15px rgba(163,163,163,0.4); }
+        .timer-bar-wrap { width: 120px; height: 4px; background: rgba(64,64,64,0.5); border-radius: 2px; margin-top: 6px; margin-left: auto; overflow: hidden; }
+        .timer-bar { height: 4px; background: linear-gradient(90deg, #a3a3a3, #737373); border-radius: 2px; transition: width 1s linear; box-shadow: 0 0 10px rgba(163,163,163,0.6); }
+
+        .container { padding: 30px; max-width: 1200px; margin: 0 auto; position: relative; z-index: 1; }
+
+        .section-title { font-size: 0.8rem; color: rgba(163,163,163,0.9); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 15px; margin-top: 30px; font-weight: 600; }
+        .divider { border: none; border-top: 1px solid rgba(64,64,64,0.3); margin: 25px 0; }
+        .refresh { color: rgba(163,163,163,0.8); font-size: 0.8rem; text-align: right; margin-bottom: 10px; }
+
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 10px; }
+        .card {
+            background: rgba(30,30,30,0.4);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border-radius: 16px; padding: 20px;
+            border: 1px solid rgba(163,163,163,0.1);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+            transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+            position: relative; overflow: hidden;
+        }
+        .card:hover { transform: translateY(-2px); border-color: rgba(163,163,163,0.2); }
+        .card .label { font-size: 0.8rem; color: #a3a3a3; text-transform: uppercase; letter-spacing: 1px; font-weight: 500; }
+        .card .value { font-size: 2rem; font-weight: bold; margin-top: 8px; text-shadow: 0 2px 10px currentColor; }
+        .card .sub { font-size: 0.85rem; color: #737373; margin-top: 4px; }
+        .card.green .value  { color: #4ade80; }
+        .card.red .value    { color: #f87171; }
+        .card.teal .value   { color: #2dd4bf; }
+        .card.blue .value   { color: #38bdf8; }
+        .card.yellow .value { color: #fbbf24; }
+        .card.purple .value { color: #a78bfa; }
+
+        .level-VERY_CHEAP  { color: #22c55e; }
+        .level-CHEAP       { color: #4ade80; }
+        .level-NORMAL      { color: #fbbf24; }
+        .level-EXPENSIVE   { color: #f87171; }
+        .level-VERY_EXPENSIVE { color: #dc2626; }
+
+        /* PV Cards */
+        .pv-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .pv-card {
+            background: rgba(30,30,30,0.4);
+            backdrop-filter: blur(20px) saturate(180%);
+            border-radius: 16px; padding: 20px;
+            border: 1px solid rgba(163,163,163,0.1);
+            text-align: center; position: relative; overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+        }
+        .pv-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: rgba(163,163,163,0.3); }
+        .pv-card.pv1 { color: #fbbf24; }
+        .pv-card.pv2 { color: #f97316; }
+        .pv-card.pv3 { color: #a78bfa; }
+        .pv-card.pv4 { color: #2dd4bf; }
+        .pv-card.pv1::before { background: #fbbf24; }
+        .pv-card.pv2::before { background: #f97316; }
+        .pv-card.pv3::before { background: #a78bfa; }
+        .pv-card.pv4::before { background: #2dd4bf; }
+        .pv-card .pv-name { font-size: 0.75rem; color: #a3a3a3; text-transform: uppercase; letter-spacing: 1px; }
+        .pv-card .pv-live { font-size: 2rem; font-weight: bold; margin: 8px 0 4px; color: #a3a3a3; }
+        .pv-card.pv1 .pv-live { color: #fbbf24; }
+        .pv-card.pv2 .pv-live { color: #f97316; }
+        .pv-card.pv3 .pv-live { color: #a78bfa; }
+        .pv-card.pv4 .pv-live { color: #2dd4bf; }
+        .pv-card .pv-unit { font-size: 0.8rem; color: #737373; }
+        .pv-card .pv-total { font-size: 0.85rem; color: #737373; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(64,64,64,0.4); }
+        .pv-card .pv-total span { font-weight: bold; color: #e5e5e5; }
+
+        @keyframes pvVertSweep {
+            0%   { top: 120%; }
+            100% { top: -80%; }
+        }
+        .pv-card.pulsing::after {
+            content: '';
+            position: absolute;
+            left: 0; right: 0; height: 60%;
+            mix-blend-mode: screen;
+            pointer-events: none;
+            z-index: 5;
+            animation: pvVertSweep 3.5s ease-in-out infinite;
+        }
+        .pv-card.pv1.pulsing::after { background: linear-gradient(0deg, transparent 0%, rgba(251,191,36,0.45) 50%, transparent 100%); }
+        .pv-card.pv2.pulsing::after { background: linear-gradient(0deg, transparent 0%, rgba(249,115,22,0.45) 50%, transparent 100%); }
+        .pv-card.pv3.pulsing::after { background: linear-gradient(0deg, transparent 0%, rgba(167,139,250,0.45) 50%, transparent 100%); }
+        .pv-card.pv4.pulsing::after { background: linear-gradient(0deg, transparent 0%, rgba(45,212,191,0.45) 50%, transparent 100%); }
+
+        /* Live Box */
+        .live {
+            background: rgba(30,30,30,0.4);
+            backdrop-filter: blur(20px) saturate(180%);
+            border-radius: 16px; padding: 20px;
+            border: 1px solid rgba(163,163,163,0.1);
+            margin-bottom: 30px;
+        }
+        .live-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+        .live-item { text-align: center; padding: 15px; background: rgba(10,10,10,0.5); border-radius: 12px; border: 1px solid rgba(64,64,64,0.2); position: relative; overflow: hidden; }
+        .live-item .live-val { font-size: 1.5rem; font-weight: bold; color: #a3a3a3; }
+        .live-item .live-label { font-size: 0.75rem; color: #737373; margin-top: 4px; }
+
+        /* Charts */
+        .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+        .chart-box {
+            background: rgba(30,30,30,0.4);
+            backdrop-filter: blur(20px);
+            border-radius: 16px; padding: 20px;
+            border: 1px solid rgba(163,163,163,0.1);
+        }
+        .chart-box.full { grid-column: 1 / -1; }
+        .chart-box canvas { max-height: 400px; }
+        .chart-box h3 { color: #a3a3a3; font-size: 0.9rem; margin-bottom: 8px; }
+        .chart-subtitle { font-size: 0.75rem; color: rgba(163,163,163,0.5); margin-bottom: 12px; }
+
+        /* Tabelle */
+        .daily {
+            background: rgba(30,30,30,0.4);
+            backdrop-filter: blur(20px);
+            border-radius: 16px; padding: 20px;
+            border: 1px solid rgba(163,163,163,0.1);
+            margin-bottom: 30px; overflow-x: auto;
+        }
+        .daily h3 { color: #a3a3a3; font-size: 0.9rem; margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; min-width: 900px; }
+        th { text-align: left; padding: 12px 10px; color: #737373; font-size: 0.8rem; border-bottom: 1px solid rgba(64,64,64,0.3); background: rgba(10,10,10,0.3); }
+        td { padding: 12px 10px; font-size: 0.85rem; border-bottom: 1px solid rgba(30,30,30,0.3); }
+        .pos { color: #4ade80; font-weight: bold; }
+        .neg { color: #f87171; font-weight: bold; }
+
+        .soc-btn { background: rgba(30,30,30,0.5); color: #737373; border: 1px solid rgba(64,64,64,0.3); border-radius: 8px; padding: 4px 12px; cursor: pointer; transition: all 0.3s; font-size: 12px; }
+        .soc-btn:hover { background: rgba(64,64,64,0.5); color: #a3a3a3; }
+        .soc-btn-active { background: rgba(163,163,163,0.8) !important; color: #0a0a0a !important; }
+        .soc-btn:disabled { opacity: 0.3; cursor: default; }
+
+        .daily-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+        tfoot tr { border-top: 2px solid rgba(163,163,163,0.15); }
+        tfoot td { padding: 10px 10px; font-size: 0.82rem; font-weight: 600; color: #a3a3a3; background: rgba(10,10,10,0.3); }
+
+        @keyframes liveVertSweep {
+            0%   { top: 130%; }
+            100% { top: -90%; }
+        }
+        .live-item.pulsing::after {
+            content: '';
+            position: absolute;
+            left: 0; right: 0; height: 70%;
+            background: linear-gradient(0deg, transparent 0%, rgba(255,255,255,0.22) 50%, transparent 100%);
+            mix-blend-mode: screen;
+            pointer-events: none;
+            z-index: 5;
+            animation: liveVertSweep 3s ease-in-out infinite;
+        }
+
+        /* ── Go-e Charging Animation ─────────────────────────── */
+        .goe-section {
+            border-radius: 16px;
+            border: 1px solid rgba(163,163,163,0.1);
+            padding: 0 0 4px;
+            margin-bottom: 4px;
+            transition: border-color 0.6s ease, box-shadow 0.6s ease;
+        }
+        .goe-section.charging {
+            border-color: rgba(56,189,248,0.35);
+            animation: goeSectionPulse 3s ease-in-out infinite;
+        }
+        @keyframes goeSectionPulse {
+            0%,100% { box-shadow: 0 0 30px rgba(56,189,248,0.05); }
+            50%      { box-shadow: 0 0 60px rgba(56,189,248,0.18), 0 0 100px rgba(56,189,248,0.06); }
+        }
+
+        .goe-banner {
+            display: none;
+            background: linear-gradient(135deg, rgba(14,165,233,0.1), rgba(56,189,248,0.05));
+            border-bottom: 1px solid rgba(56,189,248,0.2);
+            border-radius: 14px 14px 0 0;
+            padding: 16px 20px;
+            align-items: center;
+            gap: 16px;
+            overflow: hidden;
+            position: relative;
+        }
+        .goe-banner.visible { display: flex; }
+
+        .goe-banner::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -60%;
+            width: 50%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(56,189,248,0.08), transparent);
+            animation: goeScanLine 2.5s ease-in-out infinite;
+        }
+        @keyframes goeScanLine {
+            0%   { left: -60%; }
+            100% { left: 140%; }
+        }
+
+        .goe-car-visual {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 0;
+        }
+        .goe-plug {
+            font-size: 28px;
+            animation: goePlugGlow 1.5s ease-in-out infinite;
+            filter: drop-shadow(0 0 6px rgba(56,189,248,0.7));
+        }
+        @keyframes goePlugGlow {
+            0%,100% { filter: drop-shadow(0 0 5px rgba(56,189,248,0.6)); }
+            50%      { filter: drop-shadow(0 0 16px rgba(56,189,248,1.0)); }
+        }
+        .goe-cable {
+            position: relative;
+            width: 60px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+        }
+        .goe-cable-line {
+            position: absolute;
+            top: 50%; left: 0; right: 0;
+            height: 2px;
+            background: rgba(56,189,248,0.2);
+            border-radius: 2px;
+            transform: translateY(-50%);
+        }
+        .goe-cable-bolt {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 9px;
+            color: #38bdf8;
+            text-shadow: 0 0 8px #38bdf8;
+            animation: goeFlowBolt 1.2s linear infinite;
+            opacity: 0;
+        }
+        .goe-cable-bolt:nth-child(2) { animation-delay: 0.4s; }
+        .goe-cable-bolt:nth-child(3) { animation-delay: 0.8s; }
+        @keyframes goeFlowBolt {
+            0%   { left: -5%; opacity: 0; }
+            10%  { opacity: 1; }
+            90%  { opacity: 1; }
+            100% { left: 100%; opacity: 0; }
+        }
+        .goe-car-wrap { position: relative; }
+        .goe-car {
+            font-size: 38px;
+            animation: goeCarFloat 3s ease-in-out infinite;
+            filter: drop-shadow(0 0 10px rgba(56,189,248,0.35));
+            display: block;
+        }
+        @keyframes goeCarFloat {
+            0%,100% { transform: translateY(0); }
+            50%      { transform: translateY(-3px); }
+        }
+        .goe-bat-bar {
+            position: absolute;
+            bottom: -4px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 36px;
+            height: 5px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 3px;
+            border: 1px solid rgba(56,189,248,0.3);
+            overflow: hidden;
+        }
+        .goe-bat-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #22c55e, #38bdf8);
+            border-radius: 2px;
+            animation: goeBatFill 5s ease-in-out infinite alternate;
+            box-shadow: 0 0 5px rgba(56,189,248,0.8);
+        }
+        @keyframes goeBatFill {
+            0%   { width: 40%; }
+            100% { width: 90%; }
+        }
+
+        .goe-banner-text { flex: 1; min-width: 0; }
+        .goe-banner-status {
+            font-size: 13px;
+            font-weight: 700;
+            color: #38bdf8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            animation: goeTextGlow 2s ease-in-out infinite;
+        }
+        @keyframes goeTextGlow {
+            0%,100% { text-shadow: 0 0 8px rgba(56,189,248,0.4); }
+            50%      { text-shadow: 0 0 20px rgba(56,189,248,0.9); }
+        }
+        .goe-banner-power {
+            font-size: 26px;
+            font-weight: 800;
+            color: #fff;
+            margin: 2px 0;
+            white-space: nowrap;
+        }
+        .goe-banner-power span { font-size: 13px; color: rgba(255,255,255,0.45); font-weight: 400; }
+        .goe-banner-sub { font-size: 11px; color: rgba(255,255,255,0.35); }
+
+        .goe-bolt-ring {
+            flex-shrink: 0;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: 2px solid rgba(56,189,248,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            position: relative;
+            animation: goeRingPulse 1.5s ease-in-out infinite;
+        }
+        .goe-bolt-ring::before {
+            content: '';
+            position: absolute;
+            inset: -6px;
+            border-radius: 50%;
+            border: 2px solid rgba(56,189,248,0.12);
+            animation: goeRingPulse 1.5s ease-in-out infinite 0.35s;
+        }
+        @keyframes goeRingPulse {
+            0%,100% { transform: scale(1); opacity: 1; }
+            50%      { transform: scale(1.18); opacity: 0.5; }
+        }
+
+        .card.goe-charging {
+            border-color: rgba(56,189,248,0.25);
+            animation: goeCardPulse 2.5s ease-in-out infinite;
+        }
+        @keyframes goeCardPulse {
+            0%,100% { box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05); }
+            50%      { box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(56,189,248,0.18); }
+        }
+
+        @media (max-width: 600px) {
+            .goe-banner { padding: 12px 14px; gap: 10px; }
+            .goe-plug { font-size: 22px; }
+            .goe-cable { width: 40px; }
+            .goe-car { font-size: 28px; }
+            .goe-banner-power { font-size: 20px; }
+            .goe-bolt-ring { width: 36px; height: 36px; font-size: 14px; }
+        }
+
+        /* Farben für Tabelle */
+        .acc { color: #fbbf24; }
+        .blu { color: #38bdf8; }
+        .neu { color: #a3a3a3; }
+
+        /* ── Tagesübersicht Kompakt-Tabelle ── */
+        .daily-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -20px; }
+        .daily-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        .dt { width: 100%; min-width: 700px; border-collapse: collapse; }
+        .dt th.date-col, .dt td.date-col {
+            position: sticky; left: 0; z-index: 2;
+            background: rgba(14,14,14,0.98);
+            border-right: 1px solid rgba(100,100,100,0.2);
+            min-width: 62px; max-width: 62px;
+            padding: 8px 10px; text-align: left;
+            font-size: 0.8rem; white-space: nowrap;
+        }
+        .dt thead th {
+            padding: 8px 10px 6px;
+            font-size: 0.68rem; color: #525252;
+            text-transform: uppercase; letter-spacing: 0.3px;
+            border-bottom: 1px solid rgba(100,100,100,0.2);
+            text-align: right; white-space: nowrap;
+            min-width: 80px; background: rgba(12,12,12,0.8);
+            font-weight: 600;
+        }
+        .dt thead th.date-col { text-align: left; color: #404040; }
+        .dt thead th .unit {
+            display: block; font-size: 0.6rem; color: #404040;
+            font-weight: 400; text-transform: none; letter-spacing: 0; margin-top: 1px;
+        }
+        .dt tbody td {
+            padding: 8px 10px; font-size: 0.88rem;
+            text-align: right; border-bottom: 1px solid rgba(64,64,64,0.12);
+            white-space: nowrap; color: #d4d4d4;
+        }
+        .dt tbody tr:last-child td { border-bottom: none; }
+        .dt tbody tr.dt-sum td {
+            background: rgba(56,189,248,0.07);
+            border-top: 1px solid rgba(56,189,248,0.25);
+            border-bottom: 1px solid rgba(56,189,248,0.2);
+            font-weight: 700; font-size: 0.88rem;
+        }
+        .dt tbody tr.dt-sum td.date-col {
+            color: #38bdf8; background: rgba(14,14,14,0.98);
+        }
+        .dt tbody tr.dt-today td {
+            background: rgba(255,255,255,0.03); font-weight: 600; color: #e5e5e5;
+        }
+        .dt tbody tr.dt-today td.date-col { color: #d4d4d4; }
+        .dt tbody tr:not(.dt-sum):hover td { background: rgba(255,255,255,0.02); }
+        .dt tbody tr:not(.dt-sum):hover td.date-col { background: rgba(14,14,14,0.98); }
+        .dt tbody tr td.pos { color: #4ade80; font-weight: bold; }
+        .dt tbody tr td.neg { color: #f87171; font-weight: bold; }
+        .dt tbody tr td.acc { color: #fbbf24; }
+        .dt tbody tr td.blu { color: #38bdf8; }
+        .dt tbody tr td.neu { color: #a3a3a3; }
+
+        /* PV Tages-Totals im Chart-Header */
+        .pv-chart-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+        .pv-day-totals { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; }
+        .pv-tot-item { text-align:center; min-width:55px; }
+        .pv-tot-sep { border-left:1px solid rgba(64,64,64,0.4); padding-left:8px; min-width:70px; }
+
+        /* Summenzeile Tagesübersicht */
+        .daily tbody tr.sum-row { background:rgba(56,189,248,0.06); border:1px solid rgba(56,189,248,0.2); }
+
+        /* ── Expand-to-Day ── */
+        .dt tbody tr.dt-data { cursor: pointer; }
+        .dt tbody tr.dt-data.dt-open td { background: rgba(56,189,248,0.04); }
+        .dt tbody tr.dt-data.dt-open td.date-col { background: rgba(14,14,14,0.98); color: #38bdf8; }
+        .dt-expand-icon { font-size: 0.55rem; color: #404040; margin-left: 3px; display: inline-block; transition: transform 0.2s; vertical-align: middle; }
+        .dt-data.dt-open .dt-expand-icon { transform: rotate(90deg); color: #38bdf8; }
+        tr.dt-expand-row { display: none; }
+        tr.dt-expand-row.dt-open { display: table-row; }
+        tr.dt-expand-row td { padding: 0; border-bottom: 1px solid rgba(56,189,248,0.12); background: rgba(8,8,8,0.7); }
+        .dt-expand-cell { position: static !important; background: rgba(8,8,8,0.7) !important; border-right: none !important; z-index: 0 !important; }
+        .dt-expand-content { padding: 12px 16px; box-sizing: border-box; }
+        @media (max-width: 700px) {
+            .dt-expand-content { width: 100vw; max-width: 100vw; }
+        }
+        .dt-expand-stats { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        .dt-expand-stat { flex: 1; min-width: 70px; background: rgba(20,20,20,0.7); border-radius: 8px; padding: 8px 10px; border: 1px solid rgba(100,100,100,0.1); text-align: center; }
+        .dt-expand-stat .es-val { font-size: 0.9rem; font-weight: 800; }
+        .dt-expand-stat .es-label { font-size: 0.57rem; color: #525252; text-transform: uppercase; letter-spacing: 0.8px; margin-top: 2px; }
+        .dt-expand-chart { background: rgba(20,20,20,0.7); border-radius: 8px; padding: 10px; border: 1px solid rgba(100,100,100,0.1); }
+        .dt-expand-chart-title { font-size: 0.62rem; color: #525252; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+
+        @media (max-width: 600px) {
+            .pv-chart-header { flex-wrap: wrap; gap: 8px; }
+            .pv-day-totals {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 6px;
+                width: 100%;
+            }
+            .pv-tot-item, .pv-tot-sep {
+                min-width: unset;
+                border-left: none;
+                padding-left: 0;
+                background: rgba(255,255,255,0.04);
+                border-radius: 8px;
+                padding: 6px 4px;
+                text-align: center;
+            }
+        }
+
+        /* ══════════════════════════════════════
+           ENERGIEFLUSS-DIAGRAMM
+           ══════════════════════════════════════ */
+        .ef-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; margin-top: 30px; }
+        .ef-section-title { font-size: 0.8rem; color: rgba(163,163,163,0.9); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+        /* Price Badge */
+        .price-badge {
+            display: flex; align-items: center; gap: 10px;
+            background: rgba(10,10,10,0.6); border-radius: 12px; padding: 8px 14px;
+            border: 1px solid rgba(100,100,100,0.2); flex-shrink: 0;
+        }
+        .price-badge .pb-label { font-size: 0.62rem; color: #525252; text-transform: uppercase; letter-spacing: 0.8px; }
+        .price-badge .pb-val   { font-size: 1.25rem; font-weight: 800; line-height: 1; }
+        .price-badge .pb-unit  { font-size: 0.62rem; color: #737373; margin-top: 1px; }
+        .price-badge .pb-level { font-size: 0.6rem; font-weight: 700; padding: 3px 8px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .pb-next { font-size: 0.6rem; color: #525252; margin-top: 3px; display: flex; align-items: center; gap: 4px; }
+        .pb-next .arrow { font-size: 0.55rem; }
+        .pb-chart { display: flex; align-items: flex-end; gap: 2px; height: 28px; margin-top: 6px; }
+        .pb-bar { flex: 1; border-radius: 2px 2px 0 0; min-width: 6px; transition: all 0.3s; }
+        .pb-bar.now { outline: 1px solid rgba(255,255,255,0.4); }
+        /* Level color variants on wrapper */
+        .pb-CHEAP       .pb-val, .pb-VERY_CHEAP  .pb-val { color: #4ade80; }
+        .pb-NORMAL      .pb-val { color: #fbbf24; }
+        .pb-EXPENSIVE   .pb-val, .pb-VERY_EXPENSIVE .pb-val { color: #f87171; }
+        .pb-CHEAP       .pb-level, .pb-VERY_CHEAP  .pb-level { background: rgba(74,222,128,0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+        .pb-NORMAL      .pb-level { background: rgba(251,191,36,0.12); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+        .pb-EXPENSIVE   .pb-level, .pb-VERY_EXPENSIVE .pb-level { background: rgba(248,113,113,0.12); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+        .pb-CHEAP .price-badge, .pb-VERY_CHEAP .price-badge { animation: cheapBadgePulse 2.5s ease-in-out infinite; }
+        @keyframes cheapBadgePulse { 0%,100% { border-color: rgba(74,222,128,0.2); } 50% { border-color: rgba(74,222,128,0.5); box-shadow: 0 0 12px rgba(74,222,128,0.12); } }
+        .ef-box { position: relative; }
+        .ef-stage { position: relative; height: 620px; max-width: 560px; margin: 0 auto 12px; }
+        .ef-node {
+            position: absolute; width: 120px; min-height: 150px;
+            background: rgba(18,18,18,0.85); border-radius: 14px; padding: 12px 10px;
+            text-align: center; border: 1px solid rgba(100,100,100,0.2); z-index: 2;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .ef-node .en-icon { font-size: 20px; }
+        .ef-node .en-name { font-size: 0.6rem; color: #737373; text-transform: uppercase; letter-spacing: 0.7px; margin-top: 3px; }
+        .ef-node .en-val  { font-size: 1.05rem; font-weight: 800; margin-top: 3px; line-height: 1; transition: color 0.3s; }
+        .ef-node .en-unit { font-size: 0.6rem; color: #737373; }
+        .ef-node .en-sub  { font-size: 0.6rem; color: #525252; margin-top: 2px; }
+        .ef-node.bat-n   { border-color: rgba(56,189,248,0.35);  top: 0;   left: 0; }
+        .ef-node.bat-n .en-val { color: #38bdf8; }
+        .ef-ring-wrap { position: relative; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; }
+        .ef-ring-wrap svg { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
+        .ef-ring-icon { font-size: 16px; z-index: 1; }
+        .ef-node.pv-n    { border-color: rgba(251,191,36,0.35);  top: 0;   right: 0; }
+        .ef-node.pv-n .en-val { color: #fbbf24; }
+        .ef-node.grid-n  { border-color: rgba(167,139,250,0.3);  top: 50%; left: 0;   transform: translateY(-50%); }
+        .ef-node.grid-n .en-val { color: #a78bfa; }
+        .ef-node.house-n { border-color: rgba(74,222,128,0.3);   top: 50%; right: 0;  transform: translateY(-50%); }
+        .ef-node.house-n .en-val { color: #4ade80; }
+        .ef-node.car-n   { border-color: rgba(45,212,191,0.3);   bottom: 0; left: 50%; transform: translateX(-50%); }
+        .ef-node.car-n .en-val { color: #2dd4bf; }
+        .ef-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; overflow: visible; pointer-events: none; }
+        .ef-ts { font-size: 0.68rem; color: #383838; text-align: right; margin-top: 4px; }
+
+        /* ══════════════════════════════════════
+           BEST/WORST DAY HIGHLIGHTER
+           ══════════════════════════════════════ */
+        .dt-legend { display: flex; gap: 14px; margin-bottom: 8px; flex-wrap: wrap; }
+        .dt-legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.7rem; color: #737373; }
+        .dt-legend-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+        .dt-legend-dot.best  { background: rgba(74,222,128,0.3);  border: 1px solid rgba(74,222,128,0.6); }
+        .dt-legend-dot.worst { background: rgba(248,113,113,0.18); border: 1px solid rgba(248,113,113,0.5); }
+        .dt-legend-dot.today { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.2); }
+        .dt tbody tr.dt-best  td { background: rgba(74,222,128,0.07); }
+        .dt tbody tr.dt-best  td.date-col { background: rgba(14,14,14,0.98); color: #4ade80; }
+        .dt tbody tr.dt-worst td { background: rgba(248,113,113,0.05); }
+        .dt tbody tr.dt-worst td.date-col { background: rgba(14,14,14,0.98); color: #f87171; }
+        .bw-badge { display: inline-block; font-size: 0.58rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .bw-badge.best  { background: rgba(74,222,128,0.18); color: #4ade80; border: 1px solid rgba(74,222,128,0.35); }
+        .bw-badge.worst { background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+
+        /* ── Sortierbare Spaltenköpfe ── */
+        .dt thead th.sortable, .mc-table thead th.sortable { cursor: pointer; user-select: none; }
+        .dt thead th.sortable:hover, .mc-table thead th.sortable:hover { color: #a3a3a3; }
+        .dt thead th.sort-asc::after,  .mc-table thead th.sort-asc::after  { content: ' ↑'; color: #38bdf8; font-size: 0.7rem; }
+        .dt thead th.sort-desc::after, .mc-table thead th.sort-desc::after { content: ' ↓'; color: #38bdf8; font-size: 0.7rem; }
+
+        /* ── Stromnetz-Tile Puls bei teurem Strom ── */
+        @keyframes gridExpPulse {
+            0%,100% { border-color: rgba(248,113,113,0.3); box-shadow: none; }
+            50%      { border-color: rgba(248,113,113,0.7); box-shadow: 0 0 18px rgba(248,113,113,0.18); }
+        }
+        .ef-node.grid-n.grid-expensive { animation: gridExpPulse 2s ease-in-out infinite; }
+
+        /* ══════════════════════════════════════
+           MONATSVERGLEICH
+           ══════════════════════════════════════ */
+        .mc-summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
+        .mc-sc { background: rgba(30,30,30,0.4); border-radius: 14px; padding: 14px 16px; border: 1px solid rgba(100,100,100,0.12); }
+        .mc-sc .mc-label { font-size: 0.68rem; color: #737373; text-transform: uppercase; letter-spacing: 0.8px; }
+        .mc-sc .mc-val   { font-size: 1.5rem; font-weight: 800; margin-top: 4px; }
+        .mc-sc .mc-sub   { font-size: 0.68rem; color: #525252; margin-top: 2px; }
+        .mc-sc.gr .mc-val { color: #4ade80; }
+        .mc-sc.yl .mc-val { color: #fbbf24; }
+        .mc-sc.bl .mc-val { color: #38bdf8; }
+        .mc-sc.pu .mc-val { color: #a78bfa; }
+        .mc-sc.re .mc-val { color: #f87171; }
+        .mc-wrap { background: rgba(20,20,20,0.6); border-radius: 16px; border: 1px solid rgba(100,100,100,0.12); overflow: hidden; }
+        .mc-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .mc-table { width: max-content; min-width: 100%; border-collapse: collapse; }
+        .mc-table thead th { padding: 9px 12px 7px; font-size: 0.67rem; color: #525252; text-transform: uppercase; letter-spacing: 0.3px; border-bottom: 1px solid rgba(100,100,100,0.2); text-align: right; white-space: nowrap; background: rgba(18,18,18,0.6); min-width: 82px; }
+        .mc-table thead th.mc-col { text-align: left; min-width: 80px; color: #404040; }
+        .mc-table thead th .unit { display: block; font-size: 0.6rem; color: #404040; font-weight: 400; text-transform: none; margin-top: 1px; }
+        .mc-table tbody td { padding: 9px 12px; font-size: 0.88rem; text-align: right; border-bottom: 1px solid rgba(64,64,64,0.1); white-space: nowrap; color: #d4d4d4; }
+        .mc-table tbody tr:last-child td { border-bottom: none; }
+        .mc-table tbody td.mc-col { text-align: left; font-size: 0.82rem; color: #a3a3a3; font-weight: 600; cursor: pointer; }
+        .mc-table tbody tr.mc-year td { background: rgba(56,189,248,0.07); font-weight: 700; color: #e5e5e5; border-top: 1px solid rgba(56,189,248,0.25); border-bottom: 1px solid rgba(56,189,248,0.2); }
+        .mc-table tbody tr.mc-year td.mc-col { color: #38bdf8; cursor: default; }
+        .mc-table tbody tr.mc-cur  td { background: rgba(255,255,255,0.03); font-weight: 600; color: #e5e5e5; }
+        .mc-table tbody tr.mc-cur  td.mc-col { color: #d4d4d4; }
+        .mc-table tbody tr td.pos { color: #4ade80; font-weight: bold; }
+        .mc-table tbody tr td.neg { color: #f87171; font-weight: bold; }
+        .mc-table tbody tr td.acc { color: #fbbf24; }
+        .mc-table tbody tr td.blu { color: #38bdf8; }
+        .mc-table tbody tr td.neu { color: #a3a3a3; }
+        .mc-hint { font-size: 0.65rem; color: #383838; text-align: center; padding: 5px; }
+        @media (max-width: 600px) { .mc-summary { grid-template-columns: repeat(2, 1fr); } }
+
+        /* ── Anomalie-System ── */
+        .anom-badge {
+            display: none; align-items: center; gap: 6px;
+            padding: 5px 11px; border-radius: 8px; cursor: pointer;
+            font-size: 0.72rem; font-weight: 600; user-select: none;
+            transition: opacity 0.15s; white-space: nowrap;
+        }
+        .anom-badge.anom-ok   { display:flex; background:rgba(74,222,128,0.1);  color:#4ade80; border:1px solid rgba(74,222,128,0.25); }
+        .anom-badge.anom-warn { display:flex; background:rgba(251,191,36,0.12); color:#fbbf24; border:1px solid rgba(251,191,36,0.3); animation:anom-pw 2s ease-in-out infinite; }
+        .anom-badge.anom-crit { display:flex; background:rgba(248,113,113,0.12);color:#f87171; border:1px solid rgba(248,113,113,0.3); animation:anom-pc 1.5s ease-in-out infinite; }
+        @keyframes anom-pw { 0%,100%{box-shadow:0 0 0 0 rgba(251,191,36,0)} 50%{box-shadow:0 0 0 5px rgba(251,191,36,0.1)} }
+        @keyframes anom-pc { 0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,0)} 50%{box-shadow:0 0 0 5px rgba(248,113,113,0.12)} }
+        .anom-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+        .anom-dot-ok   { background:#4ade80; }
+        .anom-dot-warn { background:#fbbf24; }
+        .anom-dot-crit { background:#f87171; }
+
+        .anom-panel { display:none; background:rgba(10,10,10,0.95); border-bottom:1px solid rgba(100,100,100,0.15); }
+        .anom-panel.open { display:block; }
+        .anom-panel-hdr { padding:8px 24px; font-size:0.63rem; color:#525252; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid rgba(32,32,32,0.9); }
+        .anom-item { display:flex; align-items:flex-start; gap:12px; padding:10px 24px; border-bottom:1px solid rgba(20,20,20,0.9); }
+        .anom-item:last-child { border-bottom:none; }
+        .anom-item-icon { font-size:0.85rem; flex-shrink:0; margin-top:2px; }
+        .anom-item-body { flex:1; }
+        .anom-item-title { font-size:0.78rem; font-weight:600; }
+        .anom-item-desc  { font-size:0.67rem; color:#737373; line-height:1.4; margin-top:2px; }
+        .anom-item-time  { font-size:0.6rem; color:#404040; margin-top:3px; }
+        .anom-item-action { flex-shrink:0; font-size:0.62rem; padding:3px 9px; border-radius:5px; border:1px solid rgba(100,100,100,0.3); background:rgba(30,30,30,0.8); color:#737373; cursor:pointer; white-space:nowrap; align-self:center; transition:all 0.15s; }
+        .anom-item-action:hover { color:#a3a3a3; border-color:rgba(150,150,150,0.4); }
+
+
+        .anom-item-actions { display:flex; flex-direction:column; gap:5px; align-self:center; flex-shrink:0; }
+        .anom-sev-crit .anom-item-title { color:#f87171; }
+        .anom-sev-warn .anom-item-title { color:#fbbf24; }
+        .anom-sev-info .anom-item-title { color:#38bdf8; }
+        @media (max-width:600px) { .anom-item { padding:10px 14px; } .anom-panel-hdr { padding:8px 14px; } }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div>
+        <h1>⚡ Solix Savings Dashboard</h1>
+        <p>Anker Solix Pro 3 × Tibber Strompreis-Arbitrage</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;">
+        <div id="anomBadge" class="anom-badge" onclick="toggleAnomalyPanel()">
+            <div class="anom-dot anom-dot-ok" id="anomDot"></div>
+            <span id="anomBadgeText">Alles OK</span>
+        </div>
+        <div class="timer-box">
+            <div class="timer-label">Nächstes Update in</div>
+            <div class="timer-value" id="timerDisplay">15s</div>
+            <div class="timer-bar-wrap">
+                <div class="timer-bar" id="timerBar" style="width:100%"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="anomPanel" class="anom-panel">
+    <div class="anom-panel-hdr">Aktive Meldungen</div>
+    <div id="anomList"></div>
+</div>
+
+<div class="container">
+    <div class="refresh" id="lastUpdate">Wird geladen...</div>
+
+    <!-- ═══ JAHRESÜBERSICHT ═══ -->
+    <div class="section-title">📅 Jahresübersicht</div>
+    <div class="mc-summary" id="mcSummary">
+        <div class="mc-sc gr"><div class="mc-label">Gesamtersparnis</div><div class="mc-val" id="mcTotalG">–</div><div class="mc-sub" id="mcTotalSub">–</div></div>
+        <div class="mc-sc yl"><div class="mc-label">PV produziert</div><div class="mc-val" id="mcTotalSol">–</div><div class="mc-sub">kWh gesamt</div></div>
+        <div class="mc-sc bl"><div class="mc-label">Ø Autarkie</div><div class="mc-val" id="mcAvgAut">–</div><div class="mc-sub">aller Monate</div></div>
+        <div class="mc-sc pu"><div class="mc-label">Bester Monat</div><div class="mc-val" id="mcBestMonth">–</div><div class="mc-sub" id="mcBestSub">–</div></div>
+        <div class="mc-sc re"><div class="mc-label">Netz → Batterie</div><div class="mc-val" id="mcTotalNb">–</div><div class="mc-sub">kWh geladen</div></div>
+    </div>
+    <div class="mc-wrap">
+        <div class="mc-scroll">
+        <table class="mc-table">
+            <thead>
+                <tr>
+                    <th class="mc-col sortable" onclick="setMcSortCol('ym')">Monat</th>
+                    <th class="sortable" onclick="setMcSortCol('g')">Gesamt<span class="unit">€</span></th>
+                    <th class="sortable" onclick="setMcSortCol('pv')">PV-Ersparnis<span class="unit">€</span></th>
+                    <th class="sortable" onclick="setMcSortCol('arb')">Arbitrage<span class="unit">€</span></th>
+                    <th class="sortable" onclick="setMcSortCol('sol')">Solar<span class="unit">kWh</span></th>
+                    <th class="sortable" onclick="setMcSortCol('aut')">Autarkie<span class="unit">%</span></th>
+                    <th class="sortable" onclick="setMcSortCol('hm')">Verbrauch<span class="unit">kWh</span></th>
+                    <th class="sortable" onclick="setMcSortCol('lk')">Ladekosten<span class="unit">€</span></th>
+                    <th class="sortable" onclick="setMcSortCol('er')">Entladeerlös<span class="unit">€</span></th>
+                    <th class="sortable" onclick="setMcSortCol('days')">Tage<span class="unit">#</span></th>
+                </tr>
+            </thead>
+            <tbody id="mcTable">
+                <tr><td colspan="10" style="color:#737373;text-align:center;padding:20px;">Wird geladen…</td></tr>
+            </tbody>
+        </table>
+        </div>
+        <div class="mc-hint">← scrollen für mehr Spalten →</div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- ═══ LIVE ENERGIEFLUSS ═══ -->
+    <div class="ef-section-header">
+        <span class="ef-section-title">⚡ Live Energiefluss</span>
+        <div id="priceChip">
+            <div class="price-badge">
+                <div>
+                    <div class="pb-label">Strompreis jetzt</div>
+                    <div class="pb-val" id="pcVal">–</div>
+                    <div class="pb-unit">ct/kWh</div>
+                    <div class="pb-next"><span class="arrow">▸</span><span id="pbNext">–</span></div>
+                </div>
+                <div>
+                    <div class="pb-level" id="pcLevel">–</div>
+                    <div class="pb-chart" id="pbChart"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="live">
+        <!-- Energiefluss-Diagramm -->
+        <div class="ef-box">
+            <div class="ef-stage" id="efStage">
+                <div class="ef-node pv-n" id="efPvNode">
+                    <div class="en-icon">☀️</div>
+                    <div class="en-name">PV Solar</div>
+                    <div class="en-val" id="efPvVal">–</div>
+                    <div class="en-unit">W</div>
+                </div>
+                <div class="ef-node grid-n" id="efGridNode">
+                    <div class="en-icon">🔌</div>
+                    <div class="en-name">Stromnetz</div>
+                    <div class="en-val" id="efGridVal">–</div>
+                    <div class="en-unit">W</div>
+                    <div class="en-sub" id="efGridPrice">– ct/kWh</div>
+                </div>
+                <div class="ef-node house-n" id="efHouseNode">
+                    <div class="en-icon">🏠</div>
+                    <div class="en-name">Haus</div>
+                    <div class="en-val" id="efHouseVal">–</div>
+                    <div class="en-unit">W</div>
+                </div>
+                <div class="ef-node bat-n" id="efBatNode">
+                    <div class="ef-ring-wrap">
+                        <svg width="44" height="44" viewBox="0 0 44 44">
+                            <circle cx="22" cy="22" r="18" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="4"/>
+                            <circle id="efSocRing" cx="22" cy="22" r="18" fill="none" stroke="#4ade80" stroke-width="4" stroke-linecap="round" stroke-dasharray="0 113" transform="rotate(-90 22 22)"/>
+                        </svg>
+                        <span class="ef-ring-icon">🔋</span>
+                    </div>
+                    <div class="en-name">Batterie</div>
+                    <div class="en-val" id="efBatVal">–</div>
+                    <div class="en-unit">W</div>
+                    <div class="en-sub" id="efBatSoc" style="font-weight:800;">–</div>
+                </div>
+                <div class="ef-node car-n" id="efCarNode">
+                    <div class="en-icon">🚗</div>
+                    <div class="en-name">Auto</div>
+                    <div class="en-val" id="efCarVal">–</div>
+                    <div class="en-unit">W</div>
+                    <div class="en-sub" id="efCarSub" style="visibility:hidden;">Lädt</div>
+                </div>
+                <svg class="ef-svg" id="efSvg"></svg>
+            </div>
+            <div class="ef-ts" id="efTs"></div>
+        </div>
+        <!-- Detail-Werte -->
+        <div class="live-grid">
+            <div class="live-item">
+                <div class="live-val" id="liveBatRuntime">-</div>
+                <div class="live-label">Restlaufzeit bis 5%</div>
+            </div>
+            <div class="live-item" id="itemSOC">
+                <div class="live-val" id="liveSOC">-</div>
+                <div class="live-label">Batteriestand (%)</div>
+            </div>
+            <div class="live-item">
+                <div class="live-val" id="liveBatKwh">-</div>
+                <div class="live-label">Batteriestand (kWh)</div>
+            </div>
+            <div class="live-item">
+                <div class="live-val" id="liveBatRatio">-</div>
+                <div class="live-label">Solar-Ratio Batterie (%)</div>
+            </div>
+        </div>
+        <div style="text-align:right;margin-top:12px;font-size:0.75rem;color:#737373;" id="liveSnapTs">-</div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- ═══ PV MODULE LIVE ═══ -->
+    <div class="section-title">☀️ PV Module – Live & Gesamt</div>
+    <div class="pv-cards">
+        <div class="pv-card pv1" id="pvCard1">
+            <div class="pv-name">PV1 – Süd 1</div>
+            <div class="pv-live" id="pv1Live">0</div>
+            <div class="pv-unit">Watt aktuell</div>
+            <div class="pv-total">Gesamt: <span id="pv1Total">0.0000</span> kWh</div>
+        </div>
+        <div class="pv-card pv2" id="pvCard2">
+            <div class="pv-name">PV2 – Süd 2</div>
+            <div class="pv-live" id="pv2Live">0</div>
+            <div class="pv-unit">Watt aktuell</div>
+            <div class="pv-total">Gesamt: <span id="pv2Total">0.0000</span> kWh</div>
+        </div>
+        <div class="pv-card pv3" id="pvCard3">
+            <div class="pv-name">PV3 – Flach</div>
+            <div class="pv-live" id="pv3Live">0</div>
+            <div class="pv-unit">Watt aktuell</div>
+            <div class="pv-total">Gesamt: <span id="pv3Total">0.0000</span> kWh</div>
+        </div>
+        <div class="pv-card pv4" id="pvCard4">
+            <div class="pv-name">PV4</div>
+            <div class="pv-live" id="pv4Live">0</div>
+            <div class="pv-unit">Watt aktuell</div>
+            <div class="pv-total">Gesamt: <span id="pv4Total">0.0000</span> kWh</div>
+        </div>
+    </div>
+
+    <!-- ═══ PV TAGESVERLAUF CHART ═══ -->
+    <div class="chart-box full" style="margin-bottom:30px;">
+        <div class="pv-chart-header">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <h3 style="margin:0;">☀️ PV Module Tagesverlauf</h3>
+                <div style="display:flex;align-items:center;gap:6px;margin-left:8px;">
+                    <button id="pvDayPrev" onclick="pvDayOffset++; loadPvChart()" class="soc-btn" style="padding:2px 10px;">‹</button>
+                    <span id="pvDayLabel" style="font-size:0.8rem;color:#737373;min-width:70px;text-align:center;">Heute</span>
+                    <button id="pvDayNext" onclick="pvDayOffset--; loadPvChart()" class="soc-btn" style="padding:2px 10px;" disabled>›</button>
+                </div>
+            </div>
+            <div class="pv-day-totals">
+                <div class="pv-tot-item">
+                    <div style="font-size:0.7rem;color:#fbbf24;">PV1</div>
+                    <div style="font-size:0.85rem;font-weight:bold;color:#fbbf24;" id="pv1DayTotal">– kWh</div>
+                </div>
+                <div class="pv-tot-item">
+                    <div style="font-size:0.7rem;color:#f97316;">PV2</div>
+                    <div style="font-size:0.85rem;font-weight:bold;color:#f97316;" id="pv2DayTotal">– kWh</div>
+                </div>
+                <div class="pv-tot-item">
+                    <div style="font-size:0.7rem;color:#a78bfa;">PV3</div>
+                    <div style="font-size:0.85rem;font-weight:bold;color:#a78bfa;" id="pv3DayTotal">– kWh</div>
+                </div>
+                <div class="pv-tot-item pv-tot-sep">
+                    <div style="font-size:0.7rem;color:#737373;">Gesamt</div>
+                    <div style="font-size:1.1rem;font-weight:bold;color:#fbbf24;" id="pvDayTotal">– kWh</div>
+                </div>
+            </div>
+        </div>
+        <div class="chart-subtitle" id="pvChartDate">Heute – 00:00 bis 23:59</div>
+        <div id="pvDayChartWrap" style="position:relative;width:100%;min-height:0;">
+            <canvas id="pvDayChart"></canvas>
+        </div>
+        <div id="weatherIconStrip" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding:4px 0;border-top:1px solid rgba(64,64,64,0.3);min-height:28px;"></div>
+    </div>
+
+    <!-- ═══ CHARTS: TIBBER + SOC ═══ -->
+    <div class="charts">
+        <div class="chart-box full">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <h3 style="margin:0;">📈 Tibber Preise (15-Min Auflösung)</h3>
+                <div style="display:flex;align-items:center;gap:6px;margin-left:8px;">
+                    <button onclick="tibberOffset++; loadPriceChart()" class="soc-btn" style="padding:2px 10px;">‹</button>
+                    <span id="tibberDayLabel" style="font-size:0.8rem;color:#737373;min-width:70px;text-align:center;">Heute</span>
+                    <button onclick="tibberOffset--; loadPriceChart()" class="soc-btn" style="padding:2px 10px;">›</button>
+                </div>
+            </div>
+            <canvas id="priceChart"></canvas>
+        </div>
+        <div class="chart-box full">
+            <h3>🔋 Batteriestand + Lade/Entladeleistung</h3>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <div style="display:flex;gap:8px;">
+                    <button onclick="setSocWindow(1)"  id="socBtn1h"  class="soc-btn">1h</button>
+                    <button onclick="setSocWindow(6)"  id="socBtn6h"  class="soc-btn">6h</button>
+                    <button onclick="setSocWindow(12)" id="socBtn12h" class="soc-btn soc-btn-active">12h</button>
+                    <button onclick="setSocWindow(24)" id="socBtn24h" class="soc-btn">24h</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                    <button onclick="socDayOffset++; loadSocChart()" class="soc-btn" style="padding:2px 10px;">‹</button>
+                    <span id="socDayLabel" style="font-size:0.8rem;color:#737373;min-width:55px;text-align:center;">Heute</span>
+                    <button id="socDayNext" onclick="socDayOffset--; loadSocChart()" class="soc-btn" style="padding:2px 10px;" disabled>›</button>
+                </div>
+            </div>
+            <canvas id="socChart"></canvas>
+        </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- ═══ GO-E CHARGER ═══ -->
+    <div class="section-title">🚗 Go-e Charger – E-Auto Laden</div>
+    <div class="goe-section" id="goeSection">
+        <!-- Charging Banner (nur sichtbar wenn auto lädt) -->
+        <div class="goe-banner" id="goeBanner">
+            <div class="goe-car-visual">
+                <div class="goe-plug">🔌</div>
+                <div class="goe-cable">
+                    <div class="goe-cable-line"></div>
+                    <div class="goe-cable-bolt">⚡</div>
+                    <div class="goe-cable-bolt">⚡</div>
+                    <div class="goe-cable-bolt">⚡</div>
+                </div>
+                <div class="goe-car-wrap">
+                    <span class="goe-car">🚗</span>
+                    <div class="goe-bat-bar"><div class="goe-bat-fill"></div></div>
+                </div>
+            </div>
+            <div class="goe-banner-text">
+                <div class="goe-banner-status">⚡ Fahrzeug lädt</div>
+                <div class="goe-banner-power"><span id="goeBannerW">–</span> <span>W</span></div>
+                <div class="goe-banner-sub" id="goeBannerSub">–</div>
+            </div>
+            <div class="goe-bolt-ring">⚡</div>
+        </div>
+        <div class="cards" style="padding: 16px 0 4px;">
+            <div class="card blue" id="goeCard1">
+                <div class="label">🔌 Ladestatus</div>
+                <div class="value" id="goeCarLabel">-</div>
+                <div class="sub" id="goePowerW">-</div>
+            </div>
+            <div class="card yellow" id="goeCard2">
+                <div class="label">⚡ Geladen seit Start</div>
+                <div class="value" id="goeDiffKwh">-</div>
+                <div class="sub" id="goeBaselineTs">-</div>
+            </div>
+            <div class="card red" id="goeCard3">
+                <div class="label">💸 Kosten akt. Session</div>
+                <div class="value" id="goeSessionCost">-</div>
+                <div class="sub" id="goeSessionWh">-</div>
+            </div>
+            <div class="card purple" id="goeCard4">
+                <div class="label">💰 Kumulierte Ladekosten</div>
+                <div class="value" id="goeTotalCost">-</div>
+                <div class="sub">seit DB-Start</div>
+            </div>
+            <div class="card teal" id="goeCard5">
+                <div class="label">📊 Ø Ladepreis</div>
+                <div class="value" id="goeAvgPrice">-</div>
+                <div class="sub">ct/kWh seit DB-Start</div>
+            </div>
+        </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- ═══ BREAK-EVEN ═══ -->
+    <div class="section-title">📈 Break-Even Rechner</div>
+    <div class="chart-box full" style="margin-bottom:30px;">
+        <h3>Amortisation</h3>
+        <div class="chart-subtitle">Kaufpreis 1.806 € | Kauf Juni 2025</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:1.5rem;">
+            <div style="background:rgba(10,10,10,0.5);border-radius:12px;padding:12px;border:1px solid rgba(64,64,64,0.3);">
+                <div style="font-size:0.75rem;color:#737373;margin-bottom:4px;">Kaufpreis</div>
+                <div style="font-size:1.3rem;font-weight:500;color:#e5e5e5;">1.806 €</div>
+                <div style="font-size:0.7rem;color:#525252;">Juni 2025</div>
+            </div>
+            <div style="background:rgba(10,10,10,0.5);border-radius:12px;padding:12px;border:1px solid rgba(64,64,64,0.3);">
+                <div style="font-size:0.75rem;color:#737373;margin-bottom:4px;">Ø pro Tag (Anker)</div>
+                <div style="font-size:1.3rem;font-weight:500;color:#38bdf8;" id="beAnkerProTag">–</div>
+                <div style="font-size:0.7rem;color:#525252;" id="beAnkerProMonat">– €/Monat</div>
+            </div>
+            <div style="background:rgba(10,10,10,0.5);border-radius:12px;padding:12px;border:1px solid rgba(64,64,64,0.3);">
+                <div style="font-size:0.75rem;color:#737373;margin-bottom:4px;">Ø pro Tag (Eigen)</div>
+                <div style="font-size:1.3rem;font-weight:500;color:#4ade80;" id="beEigenProTag">–</div>
+                <div style="font-size:0.7rem;color:#525252;" id="beEigenProMonat">– €/Monat · <span id="beTageDB">–</span> Tage Daten</div>
+            </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div style="background:rgba(10,10,10,0.5);border-radius:12px;padding:12px;border-left:3px solid #38bdf8;border:1px solid rgba(64,64,64,0.3);border-left:3px solid #38bdf8;">
+                <div style="font-size:0.75rem;color:#737373;margin-bottom:4px;">Break-Even (Anker)</div>
+                <div style="font-size:1.1rem;font-weight:500;color:#38bdf8;" id="beResultAnker">–</div>
+            </div>
+            <div style="background:rgba(10,10,10,0.5);border-radius:12px;padding:12px;border:1px solid rgba(64,64,64,0.3);border-left:3px solid #4ade80;">
+                <div style="font-size:0.75rem;color:#737373;margin-bottom:4px;">Break-Even (Eigen)</div>
+                <div style="font-size:1.1rem;font-weight:500;color:#4ade80;" id="beResultEigen">–</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ TAGESÜBERSICHT TABELLE ═══ -->
+    <div class="section-title">📅 Tagesübersicht</div>
+    <div class="daily">
+        <div class="daily-nav">
+            <button class="soc-btn" id="tablePrev" onclick="tableNavMonth(-1)">‹</button>
+            <span id="tableMonthLabel" style="font-size:0.9rem;font-weight:600;color:#a3a3a3;min-width:110px;text-align:center;">–</span>
+            <button class="soc-btn" id="tableNext" onclick="tableNavMonth(+1)" disabled>›</button>
+            <span id="tableMonthCount" style="font-size:0.75rem;color:#525252;margin-left:8px;"></span>
+        </div>
+        <div class="dt-legend">
+            <div class="dt-legend-item"><div class="dt-legend-dot best"></div> Bester Tag</div>
+            <div class="dt-legend-item"><div class="dt-legend-dot worst"></div> Schlechtester Tag</div>
+            <div class="dt-legend-item"><div class="dt-legend-dot today"></div> Heute</div>
+        </div>
+        <div class="daily-table-wrap">
+        <table class="dt">
+            <thead>
+                <tr>
+                    <th class="date-col sortable" onclick="setSortCol('date')">Datum</th>
+                    <th class="sortable" onclick="setSortCol('gesamt_ersparnis')">Gesamt<span class="unit">€</span></th>
+                    <th class="sortable" onclick="setSortCol('pv_ersparnis')">PV-Ersparnis<span class="unit">€</span></th>
+                    <th class="sortable" onclick="setSortCol('netz_arbitrage')">Arbitrage<span class="unit">€</span></th>
+                    <th class="sortable" onclick="setSortCol('solar_kwh')">Solar<span class="unit">kWh</span></th>
+                    <th class="sortable" onclick="setSortCol('autarkie_pct')">Autarkie<span class="unit">%</span></th>
+                    <th class="sortable" onclick="setSortCol('total_home_kwh')">Verbrauch<span class="unit">kWh</span></th>
+                    <th class="sortable" onclick="setSortCol('netz_to_bat_kwh')">Netz→Bat<span class="unit">kWh</span></th>
+                    <th class="sortable" onclick="setSortCol('netz_kosten')">Ladekosten<span class="unit">€</span></th>
+                    <th class="sortable" onclick="setSortCol('netz_erloes')">Entladeerlös<span class="unit">€</span></th>
+                </tr>
+            </thead>
+            <tbody id="dailyTable">
+                <tr><td colspan="10" style="color:#737373;text-align:center;padding:20px;">Wird geladen…</td></tr>
+            </tbody>
+        </table>
+        </div>
+    </div>
+
+</div>
+
+<script>
+let priceChart, socChart, pvDayChart;
+let pvDayOffset = 0;
+let tibberOffset = 0;
+let socDayOffset = 0;
+let socWindowHours = 12;
+
+// ── Sort state (Tagesübersicht) ──────────────────────────────────
+let _sortCol = 'date', _sortDir = -1;
+
+// ── Flow-Threshold (SVG nur neu zeichnen wenn Änderung > 10W) ───
+let _lastFlowState = null;
+function _flowChanged(s) {
+    if (!_lastFlowState) return true;
+    return ['pvW','gridBatW','batHouseW','batCarW','gridHouseW','gridCarW','gridHomW','goeW'].some(
+        k => Math.abs((s[k]||0) - (_lastFlowState[k]||0)) > 10
+    );
+}
+
+// ── sessionStorage-Cache für /api/stats (TTL 5 min) ─────────────
+const _STATS_KEY = 'solix_stats_v1';
+const _STATS_TTL = 5 * 60 * 1000;
+async function _fetchStats() {
+    try {
+        const raw = sessionStorage.getItem(_STATS_KEY);
+        if (raw) {
+            const { ts, data } = JSON.parse(raw);
+            if (Date.now() - ts < _STATS_TTL) return data;
+        }
+    } catch(e) {}
+    const data = await fetch('/api/stats?t=' + Date.now()).then(r => r.json());
+    try { sessionStorage.setItem(_STATS_KEY, JSON.stringify({ ts: Date.now(), data })); } catch(e) {}
+    return data;
+}
+
+// ── Grid expensive state ─────────────────────────────────────────
+let _currentGridHomW = 0;
+
+function utcToLocal(tsStr) {
+    return new Date(tsStr + 'Z');
+}
+
+// ── SOC Day Navigation ──────────────────────────────────────────
+function getSocDate() {
+    if (socDayOffset === 0) return null;
+    const d = new Date();
+    d.setDate(d.getDate() - socDayOffset);
+    return d.toISOString().slice(0, 10);
+}
+function getSocDayLabel() {
+    if (socDayOffset === 0) return 'Heute';
+    const d = new Date();
+    d.setDate(d.getDate() - socDayOffset);
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+}
+
+async function loadSocChart() {
+    const date = getSocDate();
+    const url = date ? '/api/snapshots?date=' + date : '/api/snapshots?hours=' + socWindowHours;
+    const snapshots = await fetch(url).then(r => r.json());
+    document.getElementById('socDayLabel').textContent = getSocDayLabel();
+    document.getElementById('socDayNext').disabled = socDayOffset <= 0;
+    ['1','6','12','24'].forEach(h => {
+        const b = document.getElementById('socBtn' + h + 'h');
+        if (b) { b.disabled = socDayOffset > 0; b.style.opacity = socDayOffset > 0 ? '0.3' : '1'; }
+    });
+    updateSOCChart(snapshots);
+}
+
+function setSocWindow(h) {
+    socWindowHours = h;
+    ['1','6','12','24'].forEach(x => {
+        const b = document.getElementById('socBtn' + x + 'h');
+        if (b) b.className = 'soc-btn' + (String(x) === String(h) ? ' soc-btn-active' : '');
+    });
+    loadSocChart();
+}
+
+// ── Tibber Navigation ───────────────────────────────────────────
+function getTibberDayLabel() {
+    const d1 = new Date(); d1.setDate(d1.getDate() - 1 - tibberOffset);
+    const d2 = new Date(); d2.setDate(d2.getDate() - tibberOffset);
+    const fmt = d => d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+    return fmt(d1) + ' – ' + fmt(d2);
+}
+
+async function loadPriceChart() {
+    const url = '/api/prices?offset=' + tibberOffset;
+    const prices = await fetch(url).then(r => r.json());
+    document.getElementById('tibberDayLabel').textContent = getTibberDayLabel();
+    updatePriceChart(prices);
+    if (tibberOffset === 0) updatePriceChip(prices);
+}
+
+function updatePriceChip(prices) {
+    if (!prices || !prices.length) return;
+    const now = new Date();
+    const sorted = [...prices].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    let curIdx = -1;
+    for (let i = sorted.length - 1; i >= 0; i--) {
+        if (utcToLocal(sorted[i].timestamp) <= now) { curIdx = i; break; }
+    }
+    if (curIdx < 0) return;
+    const cur = sorted[curIdx];
+    const ctVal = (cur.price * 100).toFixed(1);
+    const levelMap = { VERY_CHEAP: 'Sehr Günstig', CHEAP: 'Günstig', NORMAL: 'Normal', EXPENSIVE: 'Teuer', VERY_EXPENSIVE: 'Sehr Teuer' };
+
+    document.getElementById('pcVal').textContent = ctVal;
+    document.getElementById('pcLevel').textContent = levelMap[cur.level] || cur.level;
+    document.getElementById('priceChip').className = 'pb-' + cur.level;
+    document.getElementById('efGridPrice').textContent = ctVal + ' ct/kWh';
+
+    const expensive = (cur.level === 'EXPENSIVE' || cur.level === 'VERY_EXPENSIVE') && _currentGridHomW > 50;
+    const gridNode = document.getElementById('efGridNode');
+    if (gridNode) gridNode.classList.toggle('grid-expensive', expensive);
+
+    // Next hour preview
+    const next = sorted[curIdx + 1];
+    document.getElementById('pbNext').textContent = next
+        ? 'Nächste Std.: ' + (next.price * 100).toFixed(1) + ' ct'
+        : '–';
+
+    // Mini bar chart: current + next 5 hours
+    const window6 = sorted.slice(curIdx, curIdx + 6);
+    if (window6.length) {
+        const vals = window6.map(p => p.price);
+        const minP = Math.min(...vals), maxP = Math.max(...vals);
+        const range = maxP - minP || 0.001;
+        const barColor = lv => {
+            if (lv === 'VERY_CHEAP' || lv === 'CHEAP') return 'rgba(74,222,128,';
+            if (lv === 'NORMAL') return 'rgba(251,191,36,';
+            return 'rgba(248,113,113,';
+        };
+        document.getElementById('pbChart').innerHTML = window6.map((p, i) => {
+            const h = Math.round(25 + ((p.price - minP) / range) * 70);
+            const col = barColor(p.level) + (i === 0 ? '0.8)' : '0.5)');
+            return `<div class="pb-bar${i === 0 ? ' now' : ''}" style="height:${h}%;background:${col};" title="${(p.price*100).toFixed(1)} ct"></div>`;
+        }).join('');
+    }
+}
+
+// ── PV Day Navigation ───────────────────────────────────────────
+function getPvDate() {
+    if (pvDayOffset === 0) return null;
+    const d = new Date();
+    d.setDate(d.getDate() - pvDayOffset);
+    return d.toISOString().slice(0, 10);
+}
+function getPvDayLabel() {
+    if (pvDayOffset === 0) return 'Heute';
+    if (pvDayOffset === 1) return 'Gestern';
+    const d = new Date();
+    d.setDate(d.getDate() - pvDayOffset);
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+}
+
+async function loadPvChart() {
+    const date = getPvDate();
+    const url = date ? '/api/pv_today?date=' + date : '/api/pv_today';
+    const pvData = await fetch(url).then(r => r.json());
+    document.getElementById('pvDayLabel').textContent = getPvDayLabel();
+    document.getElementById('pvDayNext').disabled = pvDayOffset <= 0;
+    renderPvChart(pvData, window._lastWeather || []);
+}
+
+// ── Tibber Price Chart ──────────────────────────────────────────
+function updatePriceChart(prices) {
+    if (!prices || prices.length === 0) return;
+    const weekdays = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+    const sorted = [...prices].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    const now = new Date();
+
+    const labels = sorted.map(p => {
+        const t = utcToLocal(p.timestamp);
+        return weekdays[t.getDay()] + ' ' + t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    });
+
+    const data = sorted.map(p => p.price);
+
+    // Farbcodierung nach Preisniveau
+    const colors = sorted.map(p => {
+        if (p.level === 'VERY_CHEAP')      return 'rgba(34,197,94,0.9)';
+        if (p.level === 'CHEAP')           return 'rgba(74,222,128,0.85)';
+        if (p.level === 'EXPENSIVE')       return 'rgba(248,113,113,0.85)';
+        if (p.level === 'VERY_EXPENSIVE')  return 'rgba(220,38,38,0.9)';
+        return 'rgba(251,191,36,0.8)'; // NORMAL
+    });
+
+    let currentIdx = -1;
+    for (let i = sorted.length - 1; i >= 0; i--) {
+        if (utcToLocal(sorted[i].timestamp) <= now) { currentIdx = i; break; }
+    }
+
+    const annotations = {};
+    if (currentIdx >= 0) {
+        const t = utcToLocal(sorted[currentIdx].timestamp);
+        annotations.nowLine = {
+            type: 'line', xMin: currentIdx, xMax: currentIdx,
+            borderColor: 'rgba(255,255,255,0.8)', borderWidth: 2, borderDash: [6, 4],
+            label: {
+                display: true,
+                content: weekdays[t.getDay()] + ' ' + t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
+                color: '#fff', font: { size: 10 }, position: 'start',
+                backgroundColor: 'rgba(0,0,0,0.7)', padding: 3
+            }
+        };
+    }
+
+    if (priceChart) priceChart.destroy();
+    priceChart = new Chart(document.getElementById('priceChart'), {
+        type: 'bar',
+        data: { labels, datasets: [{ label: '€/kWh', data, backgroundColor: colors, borderRadius: 3 }] },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                annotation: Object.keys(annotations).length > 0 ? { annotations } : {}
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        color: '#737373', maxRotation: 0, maxTicksLimit: 12,
+                        callback: function(val, idx) {
+                            if (!labels[idx]) return '';
+                            const parts = labels[idx].split(' ');
+                            const time = parts[1];
+                            if (!time || !time.endsWith(':00')) return '';
+                            return time === '00:00' ? parts[0] + ' 00:00' : time;
+                        }
+                    },
+                    grid: { color: 'rgba(64,64,64,0.3)' }
+                },
+                y: { ticks: { color: '#737373' }, grid: { color: 'rgba(64,64,64,0.3)' } }
+            }
+        }
+    });
+}
+
+// ── SOC Chart ──────────────────────────────────────────────────
+function updateSOCChart(snapshots) {
+    const hours = socWindowHours || 12;
+    const batUrl = getSocDate()
+        ? `/api/bat_composition?date=${getSocDate()}`
+        : `/api/bat_composition?hours=${hours}`;
+    fetch(batUrl)
+        .then(r => r.json())
+        .then(batData => updateSOCChartWithRatio(snapshots, batData))
+        .catch(() => updateSOCChartWithRatio(snapshots, []));
+}
+
+function updateSOCChartWithRatio(snapshots, batData) {
+    const sorted = socDayOffset > 0 ? [...snapshots] : [...snapshots].reverse();
+    const labels = sorted.map(s => s.timestamp.slice(11, 16));
+
+    const batMap = {};
+    batData.forEach(b => { batMap[b.timestamp.slice(11, 16)] = b.solar_ratio; });
+
+    if (socChart) socChart.destroy();
+    socChart = new Chart(document.getElementById('socChart'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'SOC %',
+                    data: sorted.map(s => s.soc),
+                    borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.13)',
+                    fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2.5, yAxisID: 'ySoc',
+                    order: 3
+                },
+                {
+                    label: 'Solar-Ratio %',
+                    data: labels.map(l => batMap[l.slice(0,5)] !== undefined ? batMap[l.slice(0,5)] : null),
+                    borderColor: 'rgba(251,191,36,0.55)', fill: false, tension: 0.5, pointRadius: 0,
+                    borderWidth: 1.5, borderDash: [6,4], spanGaps: true, yAxisID: 'ySoc', order: 4
+                },
+                {
+                    label: 'Laden (W)',
+                    data: sorted.map(s => (s.grid_to_bat || 0) + (s.pv_production || 0)),
+                    borderColor: 'rgba(248,113,113,0.85)', backgroundColor: 'rgba(248,113,113,0.12)',
+                    fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2, yAxisID: 'yPower',
+                    order: 2
+                },
+                {
+                    label: 'Entladen (W)',
+                    data: sorted.map(s => s.bat_discharge),
+                    borderColor: 'rgba(74,222,128,0.9)', backgroundColor: 'rgba(74,222,128,0.14)',
+                    fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2, yAxisID: 'yPower',
+                    order: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: { color: '#a3a3a3', usePointStyle: true, pointStyle: 'line', padding: 16, font: { size: 11 }, boxWidth: 24, boxHeight: 2 }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => {
+                            const v = ctx.parsed.y;
+                            if (v === null || v === undefined) return null;
+                            if (ctx.dataset.yAxisID === 'ySoc') return ` ${ctx.dataset.label}: ${v.toFixed(1)}%`;
+                            return ` ${ctx.dataset.label}: ${v.toFixed(0)} W`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        color: '#525252', autoSkip: false, maxRotation: 0,
+                        callback: function(val, idx) {
+                            const label = labels[idx];
+                            if (!label) return '';
+                            const [h, m] = label.split(':').map(Number);
+                            const hours = socWindowHours || 12;
+                            if (hours <= 1)  return m % 10 === 0 ? label : '';
+                            if (hours <= 6)  return m === 0 ? label : '';
+                            if (hours <= 12) return m === 0 && h % 2 === 0 ? label : '';
+                            return m === 0 && h % 3 === 0 ? label : '';
+                        }
+                    },
+                    grid: { color: 'rgba(64,64,64,0.2)' }
+                },
+                ySoc: {
+                    type: 'linear', position: 'left', min: 0, max: 100,
+                    ticks: { color: '#38bdf8', font: { size: 10 }, callback: v => v + '%' },
+                    grid: { color: 'rgba(56,189,248,0.06)' },
+                    title: { display: true, text: 'SOC %', color: '#38bdf8', font: { size: 10 } }
+                },
+                yPower: {
+                    type: 'linear', position: 'right', min: 0,
+                    ticks: { color: '#6b7280', font: { size: 10 }, callback: v => v + 'W' },
+                    grid: { drawOnChartArea: false },
+                    title: { display: true, text: 'Leistung (W)', color: '#6b7280', font: { size: 10 } }
+                }
+            }
+        }
+    });
+}
+
+// ── PV Day Chart ────────────────────────────────────────────────
+function renderPvChart(pvToday, weather) {
+    if (!weather) weather = window._lastWeather || [];
+    const allLabels = [];
+    for (let h = 0; h < 24; h++)
+        for (let m = 0; m < 60; m += 15)
+            allLabels.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+
+    const pv1Data = new Array(allLabels.length).fill(null);
+    const pv2Data = new Array(allLabels.length).fill(null);
+    const pv3Data = new Array(allLabels.length).fill(null);
+    const pv4Data = new Array(allLabels.length).fill(null);
+
+    pvToday.forEach(p => {
+        const d = utcToLocal(p.timestamp);
+        const label = `${String(d.getHours()).padStart(2,'0')}:${String(Math.floor(d.getMinutes()/15)*15).padStart(2,'0')}`;
+        const idx = allLabels.indexOf(label);
+        if (idx !== -1) { pv1Data[idx] = p.pv1; pv2Data[idx] = p.pv2; pv3Data[idx] = p.pv3; pv4Data[idx] = p.pv4; }
+    });
+
+    const pvTotalData = allLabels.map((_, i) => {
+        const has = pv1Data[i] !== null || pv2Data[i] !== null || pv3Data[i] !== null || pv4Data[i] !== null;
+        return has ? (pv1Data[i]||0)+(pv2Data[i]||0)+(pv3Data[i]||0)+(pv4Data[i]||0) : null;
+    });
+
+    // Fülle Slots nach letztem echten Datenpunkt mit 0 damit x-Achse immer bis 23:45 geht
+    let lastReal = -1;
+    pvTotalData.forEach((v, i) => { if (v !== null) lastReal = i; });
+    if (lastReal >= 0 && lastReal < pvTotalData.length - 1) {
+        for (let i = lastReal + 1; i < pvTotalData.length; i++) pvTotalData[i] = 0;
+    }
+
+    const today = new Date().toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'2-digit', year:'numeric' });
+    document.getElementById('pvChartDate').textContent = today + ' – 00:00 bis 23:59';
+
+    let totalKwh = 0, pv1Kwh = 0, pv2Kwh = 0, pv3Kwh = 0;
+    for (let i = 0; i < allLabels.length; i++) {
+        if (pv1Data[i] !== null) {
+            totalKwh += ((pv1Data[i]||0)+(pv2Data[i]||0)+(pv3Data[i]||0)+(pv4Data[i]||0)) * 15 / 60000;
+            pv1Kwh += (pv1Data[i]||0) * 15 / 60000;
+            pv2Kwh += (pv2Data[i]||0) * 15 / 60000;
+            pv3Kwh += (pv3Data[i]||0) * 15 / 60000;
+        }
+    }
+    document.getElementById('pvDayTotal').textContent  = totalKwh.toFixed(3) + ' kWh';
+    document.getElementById('pv1DayTotal').textContent = pv1Kwh.toFixed(3) + ' kWh';
+    document.getElementById('pv2DayTotal').textContent = pv2Kwh.toFixed(3) + ' kWh';
+    document.getElementById('pv3DayTotal').textContent = pv3Kwh.toFixed(3) + ' kWh';
+
+    // Wetter-Icons Strip
+    const iconMap = { '01':'☀️','02':'🌤️','03':'⛅','04':'☁️','09':'🌧️','10':'🌦️','11':'⛈️','13':'❄️','50':'🌫️' };
+    const strip = document.getElementById('weatherIconStrip');
+    strip.innerHTML = '';
+    if (weather && weather.forecast) {
+        const sunriseTs = weather.current ? weather.current.sunrise * 1000 : null;
+        const sunsetTs  = weather.current ? weather.current.sunset  * 1000 : null;
+        const fcMap = {};
+        weather.forecast.forEach(f => { fcMap[f.timestamp] = f.icon || '01d'; });
+        const fcKeys = Object.keys(fcMap).sort();
+        for (let h = 0; h < 24; h++) {
+            const hDate = new Date(); hDate.setHours(h,0,0,0);
+            const hMs = hDate.getTime();
+            if (sunriseTs && sunsetTs && (hMs < sunriseTs - 1800000 || hMs > sunsetTs + 1800000)) continue;
+            const hUtc = new Date(hMs - 3600000);
+            const hUtcStr = hUtc.toISOString().slice(0,16).replace('T',' ') + ':00';
+            let icon = '01d';
+            for (let i = fcKeys.length - 1; i >= 0; i--) {
+                if (fcKeys[i] <= hUtcStr) { icon = fcMap[fcKeys[i]]; break; }
+            }
+            const emoji = iconMap[icon.substring(0,2)] || '🌡️';
+            const div = document.createElement('div');
+            div.style.cssText = 'text-align:center;flex:1 1 0;min-width:0;';
+            div.innerHTML = `<div style="font-size:1rem;line-height:1.2;">${emoji}</div><div style="font-size:0.55rem;color:#525252;">${String(h).padStart(2,'0')}:00</div>`;
+            strip.appendChild(div);
+        }
+    }
+
+    // Prognose
+    const forecastRaw = new Array(allLabels.length).fill(null);
+    if (weather && weather.forecast) {
+        weather.forecast.forEach(f => {
+            const fTime = utcToLocal(f.timestamp).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' });
+            const idx = allLabels.indexOf(fTime);
+            if (idx >= 0) forecastRaw[idx] = f.pv_forecast_w;
+        });
+    }
+    const forecastData = [...forecastRaw];
+    let lastKnownIdx = -1;
+    for (let i = 0; i < forecastData.length; i++) {
+        if (forecastRaw[i] !== null) {
+            if (lastKnownIdx >= 0 && i - lastKnownIdx > 1) {
+                const steps = i - lastKnownIdx;
+                for (let j = 1; j < steps; j++)
+                    forecastData[lastKnownIdx + j] = forecastRaw[lastKnownIdx] + (forecastRaw[i] - forecastRaw[lastKnownIdx]) * j / steps;
+            }
+            lastKnownIdx = i;
+        }
+    }
+
+    if (pvDayChart) pvDayChart.destroy();
+    const pvCanvas = document.getElementById('pvDayChart');
+    const pvWrap = document.getElementById('pvDayChartWrap');
+    const pvW = pvWrap ? pvWrap.clientWidth : (pvCanvas.parentElement ? pvCanvas.parentElement.clientWidth : 600);
+    pvCanvas.width  = pvW || 600;
+    pvCanvas.height = window.innerWidth <= 700 ? 220 : 240;
+    pvDayChart = new Chart(pvCanvas, {
+        type: 'line',
+        data: {
+            labels: allLabels,
+            datasets: [
+                { label: 'PV1 – Süd 1', data: pv1Data, borderColor: '#fbbf24', backgroundColor: 'rgba(251,191,36,0.08)', tension: 0.4, pointRadius: 0, pointHoverRadius: 4, fill: true, borderWidth: 2, spanGaps: false },
+                { label: 'PV2 – Süd 2', data: pv2Data, borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.08)', tension: 0.4, pointRadius: 0, pointHoverRadius: 4, fill: true, borderWidth: 2, spanGaps: false },
+                { label: 'PV3 – Flach',  data: pv3Data, borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.08)', tension: 0.4, pointRadius: 0, pointHoverRadius: 4, fill: true, borderWidth: 2, spanGaps: false },
+                { label: 'PV4',          data: pv4Data, borderColor: '#2dd4bf', backgroundColor: 'rgba(45,212,191,0.08)', tension: 0.4, pointRadius: 0, pointHoverRadius: 4, fill: true, borderWidth: 2, spanGaps: false },
+                { label: '⚡ PV Gesamt', data: pvTotalData, borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.05)', tension: 0.4, pointRadius: 0, pointHoverRadius: 4, fill: false, borderWidth: 2.5, spanGaps: false },
+                { label: 'PV Prognose',  data: forecastData, borderColor: 'rgba(255,255,255,0.4)', backgroundColor: 'rgba(255,255,255,0.03)', tension: 0.4, pointRadius: 0, borderWidth: 1.5, borderDash: [6,4], fill: true, spanGaps: false }
+            ]
+        },
+        options: {
+            responsive: false,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: true, position: 'top', labels: { color: '#a3a3a3', padding: 8, usePointStyle: false, font: { size: 10 }, boxWidth: 16, boxHeight: 2 } },
+                tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y !== null ? ctx.parsed.y.toFixed(0) + ' W' : '-'}` } }
+            },
+            scales: {
+                x: {
+                    min: allLabels[0],
+                    max: allLabels[allLabels.length - 1],
+                    ticks: { color: '#737373', maxTicksLimit: 6, maxRotation: 0, autoSkip: true, font: { size: 10 }, callback: function(val, idx) { return allLabels[idx] && allLabels[idx].endsWith(':00') ? allLabels[idx] : ''; } },
+                    grid: { color: 'rgba(64,64,64,0.3)' }
+                },
+                y: { min: 0, ticks: { color: '#737373', font: { size: 10 } }, grid: { color: 'rgba(64,64,64,0.3)' }, title: { display: true, text: 'Watt (W)', color: '#737373', font: { size: 10 } } }
+            }
+        }
+    });
+}
+
+// Resize pvDayChart when window resizes
+window.addEventListener('resize', function() {
+    if (!pvDayChart) return;
+    const pvWrap = document.getElementById('pvDayChartWrap');
+    if (!pvWrap) return;
+    const newW = pvWrap.clientWidth;
+    const newH = window.innerWidth <= 700 ? 220 : 240;
+    pvDayChart.canvas.width  = newW;
+    pvDayChart.canvas.height = newH;
+    pvDayChart.resize(newW, newH);
+});
+
+
+// ── Card Updates ────────────────────────────────────────────────
+function setEl(id, val) { const e = document.getElementById(id); if (e) e.textContent = val; }
+
+function updateCards(stats) {
+    setEl('gesamtErsparnis', (stats.gesamt_ersparnis || 0).toFixed(4) + ' €');
+    setEl('netzArbitrage',   (stats.netz_arbitrage   || 0).toFixed(4) + ' €');
+    setEl('netzKosten',      (stats.netz_kosten      || 0).toFixed(4) + ' €');
+    setEl('netzErloes',      (stats.netz_erloes      || 0).toFixed(4) + ' €');
+    setEl('pvErsparnis',     (stats.pv_ersparnis     || 0).toFixed(4) + ' €');
+    setEl('totalSolar',      (stats.total_solar_kwh  || 0).toFixed(2) + ' kWh');
+    setEl('totalSolar2',     (stats.total_solar_kwh  || 0).toFixed(4) + ' kWh');
+    setEl('totalGrid',       (stats.total_grid_kwh   || 0).toFixed(2) + ' kWh');
+
+    if (stats.autarkie_pct !== undefined) {
+        setEl('autarkieGesamt', stats.autarkie_pct.toFixed(1) + ' %');
+        setEl('autarkieSub', (stats.total_solar_kwh||0).toFixed(2) + ' kWh Solar / ' + (stats.total_home_kwh||0).toFixed(2) + ' kWh gesamt');
+    }
+    if (stats.anker_diff_eur !== undefined) {
+        setEl('ankerDiff', stats.anker_diff_eur.toFixed(2) + ' €');
+        setEl('aiemsDiff', stats.aiems_diff_eur.toFixed(2) + ' €');
+        if (stats.anker_baseline_ts)
+            setEl('ankerBaselineTs', 'seit ' + stats.anker_baseline_ts.slice(0, 16));
+    }
+    if (stats.live_price) {
+        setEl('currentPrice', (stats.live_price * 100).toFixed(1) + ' ct');
+        const levelEl = document.getElementById('priceLevel');
+        if (levelEl) { levelEl.textContent = stats.live_level || ''; levelEl.className = 'sub level-' + (stats.live_level || 'NORMAL'); }
+    }
+}
+
+// ── PV Card Updates (mit Puls-Animation) ───────────────────────
+function updatePVCards(snapshots, stats) {
+    if (!snapshots || snapshots.length === 0) return;
+    const l = snapshots[0];
+    const pvVals = [l.pv1||0, l.pv2||0, l.pv3||0, l.pv4||0];
+    const pvIds  = ['pv1Live','pv2Live','pv3Live','pv4Live'];
+    const pvCards = ['pvCard1','pvCard2','pvCard3','pvCard4'];
+    pvVals.forEach((w, i) => {
+        document.getElementById(pvIds[i]).textContent = w.toFixed(0);
+        const card = document.getElementById(pvCards[i]);
+        if (card) {
+            if (w > 5) card.classList.add('pulsing');
+            else card.classList.remove('pulsing');
+        }
+    });
+    document.getElementById('pv1Total').textContent = (stats.pv1_kwh_total || 0).toFixed(4);
+    document.getElementById('pv2Total').textContent = (stats.pv2_kwh_total || 0).toFixed(4);
+    document.getElementById('pv3Total').textContent = (stats.pv3_kwh_total || 0).toFixed(4);
+    document.getElementById('pv4Total').textContent = (stats.pv4_kwh_total || 0).toFixed(4);
+}
+
+// ── Live Daten Update ───────────────────────────────────────────
+function updateLive(snapshots) {
+    if (!snapshots || snapshots.length === 0) return;
+    const l = snapshots[0];
+    const liveFields = [
+        { valId: 'liveGridToBat',  itemId: 'itemGridToBat',  val: l.grid_to_bat   || 0 },
+        { valId: 'liveSolar',      itemId: 'itemSolar',      val: l.pv_production  || 0 },
+        { valId: 'liveBatToHome',  itemId: 'itemBatToHome',  val: l.bat_to_home   || 0 },
+        { valId: 'liveGridToHome', itemId: 'itemGridToHome', val: l.grid_to_home  || 0 },
+        { valId: 'liveDischarge',  itemId: 'itemDischarge',  val: l.bat_discharge || 0 },
+    ];
+    liveFields.forEach(f => {
+        const el = document.getElementById(f.valId);
+        if (el) el.textContent = f.val.toFixed(0);
+        const item = document.getElementById(f.itemId);
+        if (item) item.classList.toggle('pulsing', f.val > 5);
+    });
+    const soc = l.soc || 0;
+    const socEl = document.getElementById('liveSOC');
+    if (socEl) socEl.textContent = soc.toFixed(1) + '%';
+
+    fetch('/api/bat_ratio')
+        .then(r => r.json())
+        .then(d => {
+            const el = document.getElementById('liveBatRatio');
+            if (el) el.textContent = (d.solar_ratio * 100).toFixed(1) + '%';
+        })
+        .catch(() => {});
+
+    if (l.timestamp) {
+        const tsEl = document.getElementById('liveSnapTs');
+        if (tsEl) tsEl.textContent =
+            'Datenpunkt: ' + utcToLocal(l.timestamp).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit', second:'2-digit' }) + ' Uhr';
+    }
+
+    const batCapacity = 5.4;
+    const batKwh = (l.soc / 100) * batCapacity;
+    const batKwhEl = document.getElementById('liveBatKwh');
+    if (batKwhEl) batKwhEl.textContent = batKwh.toFixed(2) + ' kWh';
+    const batRtEl = document.getElementById('liveBatRuntime');
+    if (batRtEl) {
+        if (l.bat_discharge > 0) {
+            const usableKwh = Math.max(batKwh - 0.05 * batCapacity, 0);
+            const hoursLeft = usableKwh / (l.bat_discharge / 1000);
+            batRtEl.textContent = Math.floor(hoursLeft) + 'h ' + Math.floor((hoursLeft % 1) * 60) + 'min';
+        } else {
+            batRtEl.textContent = '–';
+        }
+    }
+
+    updateFlowDiagram(snapshots);
+}
+
+// ── Energiefluss-Diagramm ────────────────────────────────────────
+// Anker-Architektur: PV → Batterie → Haus (kein PV-Direktpfad ins Haus)
+function updateFlowDiagram(snapshots) {
+    if (!snapshots || !snapshots.length) return;
+    const l = snapshots[0];
+    const pvW      = Math.round(l.pv_production || 0);  // PV → Batterie
+    const gridBatW = Math.round(l.grid_to_bat   || 0);  // Netz → Batterie
+    const batHomW  = Math.round(l.bat_to_home    || 0);  // Batterie → Haus
+    const gridHomW = Math.round(l.grid_to_home   || 0);  // Netz → Haus
+    const socVal   = l.soc || 0;
+    const goeW     = _goeW;
+
+    // Netto-Batterie: Laden - Entladen
+    const batNetW = (pvW + gridBatW) - batHomW;
+
+    document.getElementById('efPvVal').textContent   = pvW;
+    // Energiefluss-Aufteilung Bat/Grid → Haus/Auto
+    // gridHomW enthält Batterieladung – abziehen für echten Hausanteil
+    const gridToHouseW = Math.max(0, gridHomW - gridBatW);           // Netz → Haus (ohne Batterieladung)
+    const houseW     = Math.max(0, gridToHouseW + batHomW - goeW);   // Gesamtverbrauch Haus
+    const batHouseW  = Math.min(batHomW, houseW);                    // Batterie → Haus
+    const batCarW    = Math.max(0, batHomW - batHouseW);             // Batterie → Auto
+    const gridHouseW = Math.max(0, houseW - batHouseW);              // Netz → Haus (Rest)
+    const gridCarW   = Math.max(0, gridToHouseW - gridHouseW);       // Netz → Auto
+
+    document.getElementById('efGridVal').textContent  = gridHomW;
+    document.getElementById('efHouseVal').textContent = houseW;
+
+    const batEl = document.getElementById('efBatVal');
+    batEl.textContent = (batNetW >= 0 ? '+' : '') + batNetW;
+    batEl.style.color = batNetW >= 0 ? '#38bdf8' : '#4ade80';
+
+    const socColor = socVal >= 50 ? '#4ade80' : socVal >= 20 ? '#fbbf24' : '#f87171';
+    const circ = 2 * Math.PI * 18;
+    const ringDash = (socVal / 100) * circ;
+    const ring = document.getElementById('efSocRing');
+    if (ring) {
+        ring.setAttribute('stroke-dasharray', `${ringDash.toFixed(1)} ${circ.toFixed(1)}`);
+        ring.setAttribute('stroke', socColor);
+    }
+    const socEl = document.getElementById('efBatSoc');
+    socEl.textContent = socVal.toFixed(1) + '%';
+    socEl.style.color = socColor;
+
+    document.getElementById('efCarVal').textContent = goeW > 0 ? goeW : '0';
+    document.getElementById('efCarSub').style.visibility = goeW > 50 ? 'visible' : 'hidden';
+
+    if (l.timestamp)
+        document.getElementById('efTs').textContent =
+            'Datenpunkt: ' + utcToLocal(l.timestamp).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit', second:'2-digit' }) + ' Uhr';
+
+    _currentGridHomW = gridHomW;
+    const flowState = { pvW, gridBatW, batHouseW, batCarW, gridHouseW, gridCarW, gridHomW, goeW };
+    if (_flowChanged(flowState)) {
+        _lastFlowState = flowState;
+        requestAnimationFrame(() => drawFlowSvg(flowState));
+    }
+}
+
+function drawFlowSvg({ pvW, gridBatW, batHouseW, batCarW, gridHouseW, gridCarW, gridHomW, goeW }) {
+    const stage = document.getElementById('efStage');
+    const svg   = document.getElementById('efSvg');
+    if (!stage || !svg) return;
+    const sr = stage.getBoundingClientRect();
+    if (sr.width < 10) return;
+    svg.setAttribute('viewBox', `0 0 ${sr.width} ${sr.height}`);
+
+    function node(id) {
+        const el = document.getElementById(id);
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return {
+            x:      b.left - sr.left + b.width  / 2,
+            y:      b.top  - sr.top  + b.height / 2,
+            top:    b.top    - sr.top,
+            bottom: b.bottom - sr.top,
+            left:   b.left   - sr.left,
+            right:  b.right  - sr.left,
+        };
+    }
+
+    const pv   = node('efPvNode');
+    const grid = node('efGridNode');
+    const house = node('efHouseNode');
+    const bat  = node('efBatNode');
+    const car  = node('efCarNode');
+    if (!pv || !grid || !house || !bat) return;
+
+    const COLORS = { yl:'#fbbf24', bl:'#38bdf8', gr:'#4ade80', pu:'#a78bfa', te:'#2dd4bf' };
+    const mkMarker = (id, col) => `<marker id="${id}" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="${col}"/></marker>`;
+
+    const flows = [];
+
+    // PV.left → Bat.right  (horizontal across top)
+    if (pvW > 10)
+        flows.push({ x1:pv.left,    y1:pv.y,      x2:bat.right,  y2:bat.y,
+                     mx:(pv.left+bat.right)/2, my:bat.y,
+                     col:COLORS.yl, mk:'mk-yl', label:pvW+'W', speed:'1.3s' });
+
+    // Bat.right → House.left  (only the portion battery covers for house)
+    if (batHouseW > 10)
+        flows.push({ x1:bat.right,  y1:bat.y,     x2:house.left, y2:house.y,
+                     mx:(bat.right+house.left)/2, my:(bat.y+house.y)/2,
+                     col:COLORS.gr, mk:'mk-gr', label:batHouseW+'W', speed:'1.2s' });
+
+    // Bat.right → Car.top  (battery power going to car charging)
+    if (car && batCarW > 10)
+        flows.push({ x1:bat.right,  y1:bat.y,     x2:car.x, y2:car.top,
+                     mx:(bat.right+car.x)/2, my:(bat.y+car.top)/2,
+                     col:COLORS.gr, mk:'mk-gr', label:batCarW+'W', speed:'1.1s' });
+
+    // Grid.top → Bat.bottom  (vertical between left-column boxes)
+    if (gridBatW > 10)
+        flows.push({ x1:grid.x,     y1:grid.top,  x2:bat.x,      y2:bat.bottom,
+                     mx:(grid.x+bat.x)/2, my:(grid.top+bat.bottom)/2,
+                     col:COLORS.bl, mk:'mk-bl', label:gridBatW+'W', speed:'1.5s' });
+
+    // Grid.right → House.left  (direct grid share, 0 when battery covers house fully)
+    if (gridHouseW > 10)
+        flows.push({ x1:grid.right, y1:grid.y,    x2:house.left, y2:house.y,
+                     mx:(grid.right+house.left)/2, my:house.y,
+                     col:COLORS.pu, mk:'mk-pu', label:gridHouseW+'W', speed:'1.4s' });
+
+    // Grid.right → Car.top  (grid share going to car charging)
+    if (car && gridCarW > 50)
+        flows.push({ x1:grid.right, y1:grid.y, x2:car.x, y2:car.top,
+                     mx:(grid.right+car.x)/2, my:(grid.y+car.top)/2,
+                     col:COLORS.te, mk:'mk-te', label:gridCarW+'W', speed:'1.0s' });
+
+    const defs = '<defs>' +
+        Object.entries(COLORS).map(([k,v]) => mkMarker('mk-'+k, v)).join('') +
+        '</defs>';
+
+    let body = '';
+    flows.forEach((f, i) => {
+        const pid = `efp${i}`;
+        const d = `M${f.x1.toFixed(1)},${f.y1.toFixed(1)} L${f.x2.toFixed(1)},${f.y2.toFixed(1)}`;
+        body += `<path id="${pid}" d="${d}" fill="none" stroke="${f.col}" stroke-width="2" stroke-opacity="0.5" marker-end="url(#${f.mk})" stroke-linecap="round"/>`;
+        [0, 0.4, 0.8].forEach(delay => {
+            body += `<circle r="3.5" fill="${f.col}" opacity="0.85"><animateMotion dur="${f.speed}" begin="${delay}s" repeatCount="indefinite"><mpath href="#${pid}"/></animateMotion></circle>`;
+        });
+        if (f.label) {
+            body += `<text x="${f.mx.toFixed(1)}" y="${(f.my-6).toFixed(1)}" text-anchor="middle" font-size="9" fill="${f.col}" font-weight="700" font-family="sans-serif">${f.label}</text>`;
+        }
+    });
+
+    svg.innerHTML = defs + body;
+}
+
+// ── Go-e Update ─────────────────────────────────────────────────
+let _goeW = 0;
+function updateGoe(goe) {
+    if (!goe || goe.error) return;
+    _goeW = goe.power_w || 0;
+    const isCharging = goe.power_w > 0;
+
+    document.getElementById('goeCarLabel').textContent    = goe.car_label  || '-';
+    document.getElementById('goePowerW').textContent      = isCharging ? goe.power_w + ' W' : 'Kein Ladevorgang';
+    document.getElementById('goeDiffKwh').textContent     = (goe.diff_kwh  || 0).toFixed(3) + ' kWh';
+    document.getElementById('goeBaselineTs').textContent  = goe.baseline_ts ? 'seit ' + goe.baseline_ts.slice(0,16) : '-';
+    document.getElementById('goeSessionCost').textContent = (goe.session_cost || 0).toFixed(4) + ' €';
+    document.getElementById('goeSessionWh').textContent   = (goe.session_wh  || 0).toFixed(0) + ' Wh geladen';
+    document.getElementById('goeTotalCost').textContent   = (goe.total_cost  || 0).toFixed(4) + ' €';
+    const avgPrice = goe.diff_kwh > 0 ? (goe.total_cost / goe.diff_kwh * 100) : 0;
+    document.getElementById('goeAvgPrice').textContent    = avgPrice.toFixed(2).replace('.', ',') + ' ct/kWh';
+
+    // Charging animation
+    const section = document.getElementById('goeSection');
+    const banner  = document.getElementById('goeBanner');
+    const cards   = [1,2,3,4,5].map(i => document.getElementById('goeCard' + i));
+
+    section.classList.toggle('charging', isCharging);
+    banner.classList.toggle('visible',   isCharging);
+    cards.forEach(c => { if (c) c.classList.toggle('goe-charging', isCharging); });
+
+    if (isCharging) {
+        document.getElementById('goeBannerW').textContent  = goe.power_w;
+        const kwh = (goe.session_wh || 0) / 1000;
+        const cost = (goe.session_cost || 0).toFixed(2);
+        document.getElementById('goeBannerSub').textContent =
+            'Session: ' + kwh.toFixed(2) + ' kWh · ' + cost + ' €';
+    }
+}
+
+// ── Tagesübersicht Tabelle ──────────────────────────────────────
+let _allDailyData = [];
+let _tableYear, _tableMonth;
+
+function updateDailyTable(daily) {
+    if (!daily || daily.length === 0) return;
+    _allDailyData = daily;
+
+    // Beim ersten Laden: aktuellen Monat setzen
+    if (_tableYear === undefined) {
+        const now = new Date();
+        _tableYear  = now.getFullYear();
+        _tableMonth = now.getMonth() + 1;
+    }
+    renderDailyTable();
+    renderMonthlyTable();
+}
+
+// ── Monatsvergleich ─────────────────────────────────────────────
+function renderMonthlyTable() {
+    if (!_allDailyData || !_allDailyData.length) return;
+    const s = (v, d=2) => (v >= 0 ? '+' : '') + v.toFixed(d);
+    const c = v => v >= 0 ? 'pos' : 'neg';
+    const monthNames = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+    const fullNames  = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+    const now = new Date();
+    const curYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+    // Gruppiere nach Jahr-Monat
+    const byMonth = {};
+    _allDailyData.forEach(d => {
+        const ym = d.date.slice(0,7);
+        if (!byMonth[ym]) byMonth[ym] = [];
+        byMonth[ym].push(d);
+    });
+
+    const months = Object.keys(byMonth).sort().reverse(); // neueste zuerst
+
+    // Jahres-Summen (gesamt)
+    const allDays = _allDailyData;
+    const totG   = allDays.reduce((a,d) => a + d.gesamt_ersparnis, 0);
+    const totSol = allDays.reduce((a,d) => a + d.solar_kwh, 0);
+    const totPV  = allDays.reduce((a,d) => a + d.pv_ersparnis, 0);
+    const totNb  = allDays.reduce((a,d) => a + (d.netz_to_bat_kwh || d.grid_kwh || 0), 0);
+
+    // Ø Autarkie (Monatsdurchschnitt)
+    const monthAuts = months.map(ym => {
+        const rows = byMonth[ym];
+        return rows.reduce((a,d) => a + (d.autarkie_pct||0), 0) / rows.length;
+    });
+    const avgAut = monthAuts.length ? monthAuts.reduce((a,b)=>a+b,0)/monthAuts.length : 0;
+
+    // Bester Monat
+    let bestYm = months[0], bestG = -Infinity;
+    months.forEach(ym => {
+        const g = byMonth[ym].reduce((a,d) => a + d.gesamt_ersparnis, 0);
+        if (g > bestG) { bestG = g; bestYm = ym; }
+    });
+
+    // Summary-Cards aktualisieren
+    document.getElementById('mcTotalG').textContent   = (totG >= 0 ? '+' : '') + totG.toFixed(2) + ' €';
+    document.getElementById('mcTotalSub').textContent = 'seit ' + fullNames[parseInt(months[months.length-1].slice(5))-1];
+    document.getElementById('mcTotalSol').textContent = totSol.toFixed(0) + ' kWh';
+    document.getElementById('mcAvgAut').textContent   = avgAut.toFixed(1) + '%';
+    document.getElementById('mcBestMonth').textContent= monthNames[parseInt(bestYm.slice(5))-1] + ' ' + bestYm.slice(0,4);
+    document.getElementById('mcBestSub').textContent  = (bestG >= 0 ? '+' : '') + bestG.toFixed(2) + ' €';
+    document.getElementById('mcTotalNb').textContent  = totNb.toFixed(1) + ' kWh';
+
+    // Jahressumme (über alle Monate)
+    const yrG   = months.reduce((a,ym) => a + byMonth[ym].reduce((b,d)=>b+d.gesamt_ersparnis,0), 0);
+    const yrPV  = months.reduce((a,ym) => a + byMonth[ym].reduce((b,d)=>b+d.pv_ersparnis,0), 0);
+    const yrArb = months.reduce((a,ym) => a + byMonth[ym].reduce((b,d)=>b+d.netz_arbitrage,0), 0);
+    const yrSol = months.reduce((a,ym) => a + byMonth[ym].reduce((b,d)=>b+d.solar_kwh,0), 0);
+    const yrHm  = months.reduce((a,ym) => a + byMonth[ym].reduce((b,d)=>b+(d.total_home_kwh||0),0), 0);
+    const yrLk  = months.reduce((a,ym) => a + byMonth[ym].reduce((b,d)=>b+d.netz_kosten,0), 0);
+    const yrEr  = months.reduce((a,ym) => a + byMonth[ym].reduce((b,d)=>b+d.netz_erloes,0), 0);
+    const yrDays= months.reduce((a,ym) => a + byMonth[ym].length, 0);
+    const yrAut = monthAuts.reduce((a,b)=>a+b,0) / (monthAuts.length||1);
+
+    const yearRow = `<tr class="mc-year">
+        <td class="mc-col">Σ ${months[0]?.slice(0,4) || ''}</td>
+        <td class="${c(yrG)}">${s(yrG)}</td>
+        <td class="acc">${s(yrPV)}</td>
+        <td class="${c(yrArb)}">${s(yrArb)}</td>
+        <td class="acc">${yrSol.toFixed(1)}</td>
+        <td class="blu">${yrAut.toFixed(1)}</td>
+        <td class="neu">${yrHm.toFixed(1)}</td>
+        <td class="${c(-yrLk)}">${s(-yrLk)}</td>
+        <td class="${c(yrEr)}">${s(yrEr)}</td>
+        <td class="neu">${yrDays}</td>
+    </tr>`;
+
+    // Monatsdaten berechnen für Sortierung
+    const monthData = months.map(ym => {
+        const rows = byMonth[ym];
+        return {
+            ym,
+            g:    rows.reduce((a,d) => a+d.gesamt_ersparnis, 0),
+            pv:   rows.reduce((a,d) => a+d.pv_ersparnis, 0),
+            arb:  rows.reduce((a,d) => a+d.netz_arbitrage, 0),
+            sol:  rows.reduce((a,d) => a+d.solar_kwh, 0),
+            hm:   rows.reduce((a,d) => a+(d.total_home_kwh||0), 0),
+            lk:   rows.reduce((a,d) => a+d.netz_kosten, 0),
+            er:   rows.reduce((a,d) => a+d.netz_erloes, 0),
+            aut:  rows.reduce((a,d) => a+(d.autarkie_pct||0), 0) / rows.length,
+            days: rows.length,
+        };
+    });
+
+    monthData.sort((a, b) => {
+        const va = a[_mcSortCol], vb = b[_mcSortCol];
+        if (typeof va === 'string') return va.localeCompare(vb) * _mcSortDir;
+        return (va - vb) * _mcSortDir;
+    });
+
+    // Sort-Indikatoren aktualisieren
+    document.querySelectorAll('.mc-table thead th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        const col = th.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+        if (col === _mcSortCol) th.classList.add(_mcSortDir === 1 ? 'sort-asc' : 'sort-desc');
+    });
+
+    const dataRows = monthData.map(({ ym, g, pv, arb, sol, hm, lk, er, aut, days }) => {
+        const isCur = ym === curYM;
+        const mIdx = parseInt(ym.slice(5)) - 1;
+        const label = `${fullNames[mIdx]} ${ym.slice(0,4)}${isCur ? ' ▸' : ''}`;
+        return `<tr class="${isCur ? 'mc-cur' : ''}" onclick="jumpToMonth('${ym}')" style="cursor:${isCur?'default':'pointer'}">
+            <td class="mc-col">${label}</td>
+            <td class="${c(g)}">${s(g)}</td>
+            <td class="acc">${s(pv)}</td>
+            <td class="${c(arb)}">${s(arb)}</td>
+            <td class="acc">${sol.toFixed(1)}</td>
+            <td class="blu">${aut.toFixed(1)}</td>
+            <td class="neu">${hm.toFixed(1)}</td>
+            <td class="${c(-lk)}">${s(-lk)}</td>
+            <td class="${c(er)}">${s(er)}</td>
+            <td class="neu">${days}</td>
+        </tr>`;
+    }).join('');
+
+    document.getElementById('mcTable').innerHTML = yearRow + dataRows;
+}
+
+function jumpToMonth(ym) {
+    _tableYear  = parseInt(ym.slice(0,4));
+    _tableMonth = parseInt(ym.slice(5));
+    renderDailyTable();
+    document.querySelector('.section-title + .daily')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function tableNavMonth(dir) {
+    _tableMonth += dir;
+    if (_tableMonth > 12) { _tableMonth = 1;  _tableYear++; }
+    if (_tableMonth < 1)  { _tableMonth = 12; _tableYear--; }
+    renderDailyTable();
+}
+
+function setSortCol(col) {
+    if (_sortCol === col) _sortDir *= -1;
+    else { _sortCol = col; _sortDir = _sortCol === 'date' ? -1 : 1; }
+    renderDailyTable();
+}
+
+// ── Sort state (Jahresübersicht) ─────────────────────────────────
+let _mcSortCol = 'ym', _mcSortDir = -1;
+
+function setMcSortCol(col) {
+    if (_mcSortCol === col) _mcSortDir *= -1;
+    else { _mcSortCol = col; _mcSortDir = col === 'ym' ? -1 : 1; }
+    renderMonthlyTable();
+}
+
+function renderDailyTable() {
+    const ym = `${_tableYear}-${String(_tableMonth).padStart(2,'0')}`;
+    const months = [...new Set(_allDailyData.map(d => d.date.slice(0,7)))].sort();
+    document.getElementById('tablePrev').disabled = !months.some(m => m < ym);
+    document.getElementById('tableNext').disabled = !months.some(m => m > ym);
+
+    const monthNames = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+    const monthShort = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+    document.getElementById('tableMonthLabel').textContent = `${monthNames[_tableMonth-1]} ${_tableYear}`;
+
+    const rows = _allDailyData.filter(d => d.date.startsWith(ym));
+    document.getElementById('tableMonthCount').textContent = rows.length > 0 ? `${rows.length} Tag${rows.length !== 1 ? 'e' : ''}` : '';
+
+    // Sortier-Indikatoren auf Spaltenköpfen aktualisieren
+    document.querySelectorAll('.dt thead th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        const col = th.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+        if (col === _sortCol) th.classList.add(_sortDir === 1 ? 'sort-asc' : 'sort-desc');
+    });
+
+    // Destroy any open expand chart before re-render; remember date to restore after
+    const _restoreExpandDate = _openExpandDate || null;
+    if (typeof _expandChart !== 'undefined' && _expandChart) { _expandChart.destroy(); _expandChart = null; }
+    _openExpandDate = null;
+
+    const tbody = document.getElementById('dailyTable');
+    if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" style="color:#737373;text-align:center;padding:20px;">Keine Daten für diesen Monat</td></tr>`;
+        return;
+    }
+
+    const s = (v, d=2) => (v >= 0 ? '+' : '') + v.toFixed(d);
+    const c = v => v >= 0 ? 'pos' : 'neg';
+    const today = new Date().toISOString().slice(0, 10);
+    const wd = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+
+    // Monatssumme
+    const sum = rows.reduce((a, d) => ({
+        g: a.g + d.gesamt_ersparnis,
+        pv: a.pv + d.pv_ersparnis,
+        arb: a.arb + d.netz_arbitrage,
+        sol: a.sol + d.solar_kwh,
+        aut: a.aut + (d.autarkie_pct || 0),
+        hm: a.hm + (d.total_home_kwh || 0),
+        nb: a.nb + (d.netz_to_bat_kwh || d.grid_kwh || 0),
+        lk: a.lk + d.netz_kosten,
+        er: a.er + d.netz_erloes,
+    }), {g:0,pv:0,arb:0,sol:0,aut:0,hm:0,nb:0,lk:0,er:0});
+
+    const sumRow = `<tr class="dt-sum">
+        <td class="date-col">Σ ${monthShort[_tableMonth-1]}</td>
+        <td class="${c(sum.g)}">${s(sum.g)}</td>
+        <td class="acc">${s(sum.pv)}</td>
+        <td class="${c(sum.arb)}">${s(sum.arb)}</td>
+        <td class="acc">${sum.sol.toFixed(2)}</td>
+        <td class="blu">${(sum.aut/rows.length).toFixed(1)}</td>
+        <td class="neu">${sum.hm.toFixed(2)}</td>
+        <td class="neu">${sum.nb.toFixed(2)}</td>
+        <td class="${c(-sum.lk)}">${s(-sum.lk)}</td>
+        <td class="${c(sum.er)}">${s(sum.er)}</td>
+    </tr>`;
+
+    // Best/Worst: nur vergangene Tage (nicht heute, damit unfertige Tage ausgeschlossen)
+    const pastRows = rows.filter(d => d.date !== today);
+    let bestDate = null, worstDate = null;
+    if (pastRows.length > 0) {
+        bestDate  = pastRows.reduce((a, b) => b.gesamt_ersparnis > a.gesamt_ersparnis ? b : a).date;
+        worstDate = pastRows.reduce((a, b) => b.gesamt_ersparnis < a.gesamt_ersparnis ? b : a).date;
+    }
+
+    // Sortierung anwenden
+    const sortedRows = [...rows].sort((a, b) => {
+        const va = _sortCol === 'date' ? a.date : (a[_sortCol] ?? 0);
+        const vb = _sortCol === 'date' ? b.date : (b[_sortCol] ?? 0);
+        if (typeof va === 'string') return va.localeCompare(vb) * _sortDir;
+        return (va - vb) * _sortDir;
+    });
+
+    const dataRows = sortedRows.map(d => {
+        const isToday = d.date === today;
+        const isBest  = d.date === bestDate;
+        const isWorst = d.date === worstDate;
+        const dt = new Date(d.date + 'T12:00:00');
+        const dateStr = d.date.slice(5).replace('-','.');
+        const badge = isBest  ? ` <span class="bw-badge best">★</span>`
+                    : isWorst ? ` <span class="bw-badge worst">▼</span>` : '';
+        const label = isToday
+            ? `Heute${badge}<br><span style="font-size:0.7rem;color:#525252;">${dateStr}</span>`
+            : `${wd[dt.getDay()]}${badge}<br><span style="font-size:0.7rem;color:#525252;">${dateStr}</span>`;
+        const nb = (d.netz_to_bat_kwh !== undefined ? d.netz_to_bat_kwh : (d.grid_kwh || 0));
+        const rowClass = isToday ? 'dt-today' : isBest ? 'dt-best' : isWorst ? 'dt-worst' : '';
+        return `<tr class="dt-data ${rowClass}" id="dt-data-${d.date}" onclick="toggleDayExpand('${d.date}')">
+            <td class="date-col">${label}<span class="dt-expand-icon">▶</span></td>
+            <td class="${c(d.gesamt_ersparnis)}">${s(d.gesamt_ersparnis,4)}</td>
+            <td class="acc">${s(d.pv_ersparnis,4)}</td>
+            <td class="${c(d.netz_arbitrage)}">${s(d.netz_arbitrage,4)}</td>
+            <td class="acc">${d.solar_kwh.toFixed(3)}</td>
+            <td class="blu">${d.autarkie_pct !== undefined ? d.autarkie_pct.toFixed(1) : '-'}</td>
+            <td class="neu">${d.total_home_kwh !== undefined ? d.total_home_kwh.toFixed(3) : '-'}</td>
+            <td class="neu">${nb.toFixed(3)}</td>
+            <td class="${c(-d.netz_kosten)}">${s(-d.netz_kosten,4)}</td>
+            <td class="${c(d.netz_erloes)}">${s(d.netz_erloes,4)}</td>
+        </tr>
+        <tr class="dt-expand-row" id="dt-expand-${d.date}">
+            <td class="dt-expand-cell" colspan="10"><div id="dt-expand-inner-${d.date}"></div></td>
+        </tr>`;
+    }).join('');
+
+    tbody.innerHTML = sumRow + dataRows;
+
+    // Re-open previously expanded day if it's still in this month's rows
+    if (_restoreExpandDate && rows.some(r => r.date === _restoreExpandDate)) {
+        toggleDayExpand(_restoreExpandDate);
+    }
+}
+
+// ── Expand-to-Day ───────────────────────────────────────────────
+let _expandChart = null;
+let _openExpandDate = null;
+
+async function toggleDayExpand(date) {
+    const expandRow = document.getElementById('dt-expand-' + date);
+    const dataRow   = document.getElementById('dt-data-' + date);
+    const isOpen    = expandRow.classList.contains('dt-open');
+
+    document.querySelectorAll('.dt-expand-row.dt-open').forEach(r => r.classList.remove('dt-open'));
+    document.querySelectorAll('.dt-data.dt-open').forEach(r => r.classList.remove('dt-open'));
+    if (_expandChart) { _expandChart.destroy(); _expandChart = null; }
+    _openExpandDate = null;
+
+    if (!isOpen) {
+        _openExpandDate = date;
+        dataRow.classList.add('dt-open');
+        expandRow.classList.add('dt-open');
+
+        const inner = document.getElementById('dt-expand-inner-' + date);
+        inner.innerHTML = '<div style="color:#525252;text-align:center;padding:14px;font-size:0.8rem;">Wird geladen…</div>';
+
+        const dayData = _allDailyData.find(d => d.date === date) || {};
+        const res     = await fetch('/api/day_detail?date=' + date).then(r => r.json()).catch(() => ({ hours: [] }));
+        const hours   = res.hours || [];
+
+        const gVal = (dayData.gesamt_ersparnis || 0);
+        const gCls = gVal >= 0 ? 'pos' : 'neg';
+        inner.innerHTML = `
+            <div class="dt-expand-content">
+                <div class="dt-expand-stats">
+                    <div class="dt-expand-stat">
+                        <div class="es-val ${gCls}">${gVal >= 0 ? '+' : ''}${gVal.toFixed(4)} €</div>
+                        <div class="es-label">Gesamtersparnis</div>
+                    </div>
+                    <div class="dt-expand-stat">
+                        <div class="es-val" style="color:#fbbf24">${(dayData.solar_kwh || 0).toFixed(3)} kWh</div>
+                        <div class="es-label">Solar</div>
+                    </div>
+                    <div class="dt-expand-stat">
+                        <div class="es-val" style="color:#38bdf8">${dayData.autarkie_pct !== undefined ? dayData.autarkie_pct.toFixed(1) : '-'}%</div>
+                        <div class="es-label">Autarkie</div>
+                    </div>
+                    <div class="dt-expand-stat">
+                        <div class="es-val" style="color:#a3a3a3">${dayData.total_home_kwh !== undefined ? dayData.total_home_kwh.toFixed(3) : '-'} kWh</div>
+                        <div class="es-label">Verbrauch</div>
+                    </div>
+                </div>
+                <div class="dt-expand-chart">
+                    <div class="dt-expand-chart-title" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+                        <span style="color:#fbbf24;font-size:0.62rem;">— PV</span>
+                        <span style="color:#38bdf8;font-size:0.62rem;">— Hausverbrauch</span>
+                        <span style="color:#4ade80;font-size:0.62rem;">— Entladeleistung</span>
+                        <span style="color:#f97316;font-size:0.62rem;">— SOC</span>
+                    </div>
+                    <canvas id="dt-chart-${date}" height="90"></canvas>
+                </div>
+            </div>`;
+
+        const ctx = document.getElementById('dt-chart-' + date).getContext('2d');
+        _expandChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: hours.map(h => h.h + 'h'),
+                datasets: [
+                    { label: 'PV (W)', data: hours.map(h => h.pv_w),
+                      borderColor: 'rgba(251,191,36,0.9)', backgroundColor: 'rgba(251,191,36,0.08)',
+                      borderWidth: 2.5, pointRadius: 0, fill: true, tension: 0.4, yAxisID: 'y' },
+                    { label: 'Haus (W)', data: hours.map(h => h.home_w),
+                      borderColor: 'rgba(56,189,248,0.9)', backgroundColor: 'rgba(56,189,248,0.07)',
+                      borderWidth: 2, pointRadius: 0, fill: true, tension: 0.4, yAxisID: 'y' },
+                    { label: 'Entladeleistung (W)', data: hours.map(h => h.bat_dis_w),
+                      borderColor: 'rgba(74,222,128,0.9)', backgroundColor: 'rgba(74,222,128,0.08)',
+                      borderWidth: 2, pointRadius: 0, fill: true, tension: 0.4, yAxisID: 'y' },
+                    { label: 'SOC (%)', data: hours.map(h => h.soc),
+                      borderColor: 'rgba(249,115,22,1)', backgroundColor: 'transparent',
+                      borderWidth: 2.5, pointRadius: 0, tension: 0.4, yAxisID: 'y2' }
+                ]
+            },
+            options: {
+                responsive: true, animation: { duration: 200 },
+                plugins: { legend: { display: false } },
+                scales: {
+                    x:  { ticks: { color: '#525252', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                    y:  { position: 'left',  min: 0, ticks: { color: '#fbbf24', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.04)' }, title: { display: true, text: 'W',    color: '#fbbf24', font: { size: 9 } } },
+                    y2: { position: 'right', min: 0, max: 100, ticks: { color: '#f97316', font: { size: 9 } }, grid: { display: false }, title: { display: true, text: 'SOC %', color: '#f97316', font: { size: 9 } } }
+                }
+            }
+        });
+    }
+}
+
+// ── Break-Even ──────────────────────────────────────────────────
+const BE_KAUFPREIS = 1806;
+
+function formatBE(monate) {
+    if (!monate) return '> 50 Jahre';
+    const m = Math.ceil(monate);
+    const j = Math.floor(m / 12);
+    const r = m % 12;
+    const d = new Date(2026, 2 + m, 1);
+    const datum = d.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+    return (j > 0 ? j + 'J ' + r + 'M' : m + ' Monate') + ' (' + datum + ')';
+}
+
+async function loadBreakEven() {
+    try {
+        const be = await fetch('/api/breakeven?t=' + Date.now()).then(r => r.json());
+        const ankerRate = be.anker_pro_tag * 30.44;
+        const eigenRate = be.eigen_pro_tag * 30.44;
+
+        document.getElementById('beAnkerProTag').textContent   = be.anker_pro_tag.toFixed(4).replace('.', ',') + ' €/Tag';
+        document.getElementById('beAnkerProMonat').textContent = ankerRate.toFixed(2).replace('.', ',') + ' €/Monat';
+        document.getElementById('beEigenProTag').textContent   = be.eigen_pro_tag.toFixed(4).replace('.', ',') + ' €/Tag';
+        document.getElementById('beEigenProMonat').innerHTML   =
+            eigenRate.toFixed(2).replace('.', ',') + ' €/Monat · <span id="beTageDB">' + be.tage_db.toFixed(1) + '</span> Tage Daten';
+
+        const restbetrag = be.restbetrag || (BE_KAUFPREIS - (be.bereits_amortisiert || 0));
+        let beAnker = null, beEigen = null;
+        for (let m = 1; m <= 600; m++) {
+            if (!beAnker && m * ankerRate >= restbetrag) beAnker = m;
+            if (!beEigen && m * eigenRate >= restbetrag) beEigen = m;
+        }
+        document.getElementById('beResultAnker').textContent = formatBE(beAnker);
+        document.getElementById('beResultEigen').textContent  = formatBE(beEigen);
+    } catch(e) { console.error('Break-Even Fehler:', e); }
+}
+
+// ── Timer ───────────────────────────────────────────────────────
+const INTERVAL = {{ dashboard_refresh_s }};
+let secondsLeft = INTERVAL;
+
+function updateTimer() {
+    secondsLeft--;
+    if (secondsLeft <= 0) { secondsLeft = INTERVAL; loadData(); }
+    document.getElementById('timerDisplay').textContent = secondsLeft + 's';
+    const pct = (secondsLeft / INTERVAL) * 100;
+    document.getElementById('timerBar').style.width = pct + '%';
+    if (secondsLeft <= 10) {
+        document.getElementById('timerBar').style.background = 'linear-gradient(90deg, #f87171, #ef4444)';
+        document.getElementById('timerDisplay').style.color = '#f87171';
+    } else {
+        document.getElementById('timerBar').style.background = 'linear-gradient(90deg, #a3a3a3, #737373)';
+        document.getElementById('timerDisplay').style.color = '#a3a3a3';
+    }
+}
+
+// ── Haupt-Datenladen ────────────────────────────────────────────
+async function loadData() {
+    secondsLeft = INTERVAL;
+    try {
+        const cacheBust = '?t=' + Date.now();
+        const [stats, goeRes, weatherRes] = await Promise.all([
+            _fetchStats(),
+            fetch('/api/goe'     + cacheBust),
+            fetch('/api/weather' + cacheBust)
+        ]);
+        const goe     = await goeRes.json();
+        const weather = await weatherRes.json();
+        window._lastWeather = weather;
+
+        updateCards(stats);
+
+        const snapshots = await fetch('/api/snapshots?hours=1').then(r => r.json());
+        updatePVCards(snapshots, stats);
+        updateLive(snapshots);
+
+        await loadPriceChart();
+        updateGoe(goe);
+        if (socDayOffset === 0) await loadSocChart();
+        await loadPvChart();
+        updateDailyTable(stats.daily);
+
+        document.getElementById('lastUpdate').textContent =
+            'Zuletzt aktualisiert: ' + new Date().toLocaleTimeString('de-DE');
+        loadAnomalies();
+    } catch(e) { console.error('Fehler beim Laden:', e); }
+}
+
+// ── Anomalie-System ─────────────────────────────────────────────
+let _anomPanelOpen = false;
+
+function toggleAnomalyPanel() {
+    const badge = document.getElementById('anomBadge');
+    if (badge.classList.contains('anom-ok')) return; // kein Panel bei OK
+    _anomPanelOpen = !_anomPanelOpen;
+    document.getElementById('anomPanel').classList.toggle('open', _anomPanelOpen);
+    _updateAnomalyArrow();
+}
+
+function _updateAnomalyArrow() {
+    const txt = document.getElementById('anomBadgeText');
+    if (!txt) return;
+    const base = txt.dataset.base || txt.textContent.replace(/ [▾▴]$/, '');
+    txt.dataset.base = base;
+    txt.textContent = base + (_anomPanelOpen ? ' ▴' : ' ▾');
+}
+
+function _updateAnomalyUI(anomalies) {
+    const badge = document.getElementById('anomBadge');
+    const dot   = document.getElementById('anomDot');
+    const txt   = document.getElementById('anomBadgeText');
+    const list  = document.getElementById('anomList');
+    if (!badge) return;
+
+    if (!anomalies || anomalies.length === 0) {
+        badge.className = 'anom-badge anom-ok';
+        dot.className   = 'anom-dot anom-dot-ok';
+        txt.textContent = 'Alles OK';
+        txt.dataset.base = '';
+        _anomPanelOpen = false;
+        document.getElementById('anomPanel').classList.remove('open');
+        return;
+    }
+
+    const hasCrit = anomalies.some(a => a.severity === 'crit');
+    const cls = hasCrit ? 'crit' : 'warn';
+    badge.className = `anom-badge anom-${cls}`;
+    dot.className   = `anom-dot anom-dot-${cls}`;
+    const label = `${anomalies.length} ${anomalies.length === 1 ? 'Meldung' : 'Meldungen'}`;
+    txt.dataset.base = label;
+    txt.textContent  = label + (_anomPanelOpen ? ' ▴' : ' ▾');
+
+    const icons = { crit: '🔴', warn: '⚠️', info: 'ℹ️' };
+    list.innerHTML = anomalies.map(a => {
+        return `
+        <div class="anom-item anom-sev-${a.severity}" id="anom-item-${a.id}">
+            <div class="anom-item-icon">${icons[a.severity] || '⚠️'}</div>
+            <div class="anom-item-body">
+                <div class="anom-item-title">${a.title}</div>
+                <div class="anom-item-desc">${a.desc}</div>
+                <div class="anom-item-time">Erkannt: ${a.detected_at || ''}</div>
+            </div>
+            <div class="anom-item-actions">
+                <div class="anom-item-action" onclick="resolveAnomaly(${a.id})">Erledigt ✓</div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function resolveAnomaly(id) {
+    const el = document.getElementById('anom-item-' + id);
+    if (el) { el.style.transition = 'opacity 0.3s'; el.style.opacity = '0'; }
+    await fetch(`/api/anomalies/${id}/resolve`, { method: 'POST' });
+    setTimeout(() => loadAnomalies(), 300);
+}
+
+async function loadAnomalies() {
+    try {
+        const data = await fetch('/api/anomalies').then(r => r.json());
+        _updateAnomalyUI(data.anomalies || []);
+    } catch(e) {}
+}
+
+loadData();
+loadBreakEven();
+loadAnomalies();
+setInterval(updateTimer, 1000);
+</script>
+
+</body>
+</html>

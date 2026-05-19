@@ -1,0 +1,27 @@
+# Anker SOLIX API library (clone separately, see README)
+api/
+
+# Credentials & local config
+config.env
+
+# Database & personal data
+data/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.bak
+*.swp
