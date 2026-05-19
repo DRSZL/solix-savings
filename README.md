@@ -8,6 +8,34 @@ Tracks real-time energy flow, calculates grid arbitrage savings, and visualises 
 
 ---
 
+## Screenshots
+
+**Annual overview & monthly savings table**
+Cumulative totals for savings, PV production, autarky, and grid-battery balance — with a per-day breakdown table showing best/worst day highlights.
+![Annual overview](screenshots/1.png)
+
+**Live energy flow diagram**
+Animated real-time view of power moving between PV, battery, grid, house, and EV charger. Shows current Tibber price and battery runtime estimate.
+![Live energy flow](screenshots/2.png)
+
+**PV module chart**
+Per-string live output and daily totals for up to 4 PV strings, overlaid with a weather-based forecast curve and hourly weather icons.
+![PV modules](screenshots/3.png)
+
+**Tibber prices & battery SOC**
+48-hour Tibber price chart (colour-coded cheap / normal / expensive) paired with a battery state-of-charge, charge, and discharge history chart.
+![Tibber prices and battery SOC](screenshots/4.png)
+
+**go-e charger panel**
+EV charging stats: current session energy, session cost, cumulative energy since tracking start, and average charge price per kWh.
+![go-e charger](screenshots/5.png)
+
+**Daily detail table**
+Full month view with per-day columns for total savings, PV savings, arbitrage, solar yield, autarky %, household consumption, grid↔battery balance, and discharge revenue.
+![Daily table](screenshots/6.png)
+
+---
+
 ## Features
 
 - **Live energy flow** — animated diagram showing PV → Battery → House → Car (go-e charger)
